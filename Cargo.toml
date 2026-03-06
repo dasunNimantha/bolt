@@ -1,0 +1,44 @@
+[package]
+name = "bolt"
+version = "0.1.0"
+edition = "2021"
+description = "Bolt - Fast multi-segment download manager for Linux"
+authors = ["Dasun P"]
+license = "MIT"
+
+[dependencies]
+# GUI Framework (matching reel's design system)
+iced = { version = "0.12", features = ["svg", "tokio"] }
+iced_aw = { version = "0.9", default-features = false, features = ["icons"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# HTTP client with streaming support
+reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Unique IDs
+uuid = { version = "1", features = ["v4"] }
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+anyhow = "1.0"
+
+# Settings storage
+directories = "5.0"
+
+# File dialog
+rfd = "0.14"
+
+# URL parsing
+url = "2"
+
+# Image for app icon
+image = { version = "0.24", default-features = false, features = ["png"] }
