@@ -495,9 +495,9 @@ fn build_settings_view<'a>(
                             .padding([6, 6])
                             .size(13)
                             .width(Length::Fixed(36.0))
-                            .style(iced::theme::TextInput::Custom(Box::new(
-                                TextInputStyle { colors },
-                            )));
+                            .style(iced::theme::TextInput::Custom(Box::new(TextInputStyle {
+                                colors,
+                            })));
                         if enabled {
                             inp = inp.on_input(on_input);
                         }
@@ -868,12 +868,7 @@ fn build_download_list<'a>(
 
     for download in downloads {
         let is_selected = selected == Some(download.id);
-        list = list.push(build_download_card(
-            download,
-            is_selected,
-            colors,
-            is_dark,
-        ));
+        list = list.push(build_download_card(download, is_selected, colors, is_dark));
     }
 
     scrollable(list)

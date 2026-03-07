@@ -367,7 +367,6 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
-
         };
         assert!((item.progress_percent() - 50.0).abs() < 0.01);
     }
@@ -387,7 +386,6 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
-
         };
         assert!((item.progress_percent() - 0.0).abs() < 0.01);
     }
@@ -407,7 +405,6 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
-
         };
         assert!((item.progress_percent() - 0.0).abs() < 0.01);
     }
@@ -427,7 +424,6 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
-
         };
         assert_eq!(item.eta_seconds(), Some(5));
     }
@@ -447,7 +443,6 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
-
         };
         assert_eq!(item.eta_seconds(), None);
     }

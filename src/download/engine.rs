@@ -1044,7 +1044,6 @@ mod tests {
             category: FileCategory::Archive,
             error: None,
             resumable: true,
-
         }]);
 
         let engine = DownloadEngine::new();
@@ -1083,7 +1082,6 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: true,
-
         }]);
 
         let engine = DownloadEngine::new();
@@ -1116,7 +1114,6 @@ mod tests {
                 category: FileCategory::Other,
                 error: None,
                 resumable: false,
-    
             },
             PersistedDownload {
                 id: id2,
@@ -1133,7 +1130,6 @@ mod tests {
                 category: FileCategory::Other,
                 error: None,
                 resumable: false,
-    
             },
         ]);
 
@@ -1169,14 +1165,16 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
-
         }]);
 
         let engine = DownloadEngine::new();
         engine.restore_downloads(&db);
 
         let auto = engine.auto_start_queued();
-        assert!(auto.is_empty(), "fresh queued downloads should not auto-start");
+        assert!(
+            auto.is_empty(),
+            "fresh queued downloads should not auto-start"
+        );
     }
 
     #[test]
@@ -1202,7 +1200,6 @@ mod tests {
                 category: FileCategory::Other,
                 error: Some("timeout".to_string()),
                 resumable: true,
-    
             },
             PersistedDownload {
                 id: id_paused,
@@ -1219,7 +1216,6 @@ mod tests {
                 category: FileCategory::Other,
                 error: None,
                 resumable: true,
-    
             },
         ]);
 

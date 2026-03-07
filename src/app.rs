@@ -74,8 +74,7 @@ impl Application for BoltApp {
 
         let tray = BoltTray::new();
         let history = DownloadHistory::load();
-        let schedule_was_active =
-            settings.schedule_enabled && settings.is_within_schedule();
+        let schedule_was_active = settings.schedule_enabled && settings.is_within_schedule();
 
         let mut app = Self {
             engine,
@@ -294,8 +293,8 @@ impl Application for BoltApp {
                     self.save_downloads();
 
                     // Scheduled auto-start: trigger once when the window opens
-                    let in_window = self.settings.schedule_enabled
-                        && self.settings.is_within_schedule();
+                    let in_window =
+                        self.settings.schedule_enabled && self.settings.is_within_schedule();
                     if in_window && !self.schedule_was_active {
                         let queued = self.engine.get_queued_ids();
                         if !queued.is_empty() {
@@ -568,7 +567,10 @@ impl Application for BoltApp {
         let has_failed = self.counts.4 > 0;
         let has_tray = self.tray.is_some();
         let has_scheduled_queued = self.settings.schedule_enabled
-            && self.downloads.iter().any(|d| d.status == DownloadStatus::Queued);
+            && self
+                .downloads
+                .iter()
+                .any(|d| d.status == DownloadStatus::Queued);
 
         let tick_sub = if has_active {
             iced::time::every(Duration::from_millis(250)).map(|_| Message::Tick)
@@ -684,4 +686,3 @@ fn open_path(path: &std::path::Path) -> std::io::Result<std::process::Child> {
         ))
     }
 }
-
