@@ -456,6 +456,22 @@ fn build_settings_view<'a>(
                 ),
             ],
         ))
+        // ── Speed limit note ──
+        .push(
+            container(
+                row![
+                    icon(Bootstrap::InfoCircle)
+                        .size(12)
+                        .style(iced::theme::Text::Color(colors.text_disabled)),
+                    Space::with_width(8),
+                    text("Speed limit changes apply after pausing and resuming active downloads.")
+                        .size(11)
+                        .style(iced::theme::Text::Color(colors.text_disabled)),
+                ]
+                .align_items(Alignment::Center),
+            )
+            .padding([0, 4]),
+        )
         // ── Schedule ──
         .push(settings_group(
             colors,
@@ -530,22 +546,6 @@ fn build_settings_view<'a>(
                 false,
             )],
         ))
-        // ── Note ──
-        .push(
-            container(
-                row![
-                    icon(Bootstrap::InfoCircle)
-                        .size(12)
-                        .style(iced::theme::Text::Color(colors.text_disabled)),
-                    Space::with_width(8),
-                    text("Speed limit changes apply after pausing and resuming active downloads.")
-                        .size(11)
-                        .style(iced::theme::Text::Color(colors.text_disabled)),
-                ]
-                .align_items(Alignment::Center),
-            )
-            .padding([0, 4]),
-        )
         // ── About ──
         .push(Space::with_height(Length::Fill))
         .push(

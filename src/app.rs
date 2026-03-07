@@ -320,10 +320,9 @@ impl Application for BoltApp {
                     }
                 }
 
-                // Network connectivity check for auto-resume
+                // Network connectivity check
                 self.network_check_counter += 1;
-                let has_failed = self.counts.4 > 0;
-                if has_failed && self.network_check_counter >= NETWORK_CHECK_INTERVAL {
+                if self.network_check_counter >= NETWORK_CHECK_INTERVAL {
                     self.network_check_counter = 0;
                     let client = reqwest::Client::builder()
                         .timeout(Duration::from_secs(5))
@@ -569,7 +568,7 @@ impl Application for BoltApp {
         } else if has_tray || has_failed || has_scheduled_queued {
             iced::time::every(Duration::from_millis(500)).map(|_| Message::Tick)
         } else {
-            Subscription::none()
+            iced::time::every(Duration::from_secs(5)).map(|_| Message::Tick)
         };
 
         Subscription::batch([close_sub, tick_sub])
