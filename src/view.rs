@@ -1,6 +1,6 @@
 use crate::message::Message;
 use crate::model::{DownloadFilter, DownloadItem, DownloadStatus, FileCategory, ViewMode};
-use crate::settings::AppSettings;
+use crate::settings::{AppSettings, DownloadHistory};
 use crate::theme::{
     get_colors, CardStyle, ColorScheme, DangerButtonStyle, DownloadCardStyle, FilterButtonStyle,
     IconButtonStyle, PanelStyle, PrimaryButtonStyle, ProgressBarCompleteStyle,
@@ -40,6 +40,9 @@ pub fn build_view<'a>(
     settings: &'a AppSettings,
     speed_limit_input: &'a str,
     max_concurrent_input: &'a str,
+    search_query: &'a str,
+    history: &'a DownloadHistory,
+    network_online: bool,
 ) -> Element<'a, Message> {
     let colors = get_colors(theme_mode);
     let is_dark = theme_mode == ThemeMode::Dark;
@@ -59,6 +62,9 @@ pub fn build_view<'a>(
             download_dir,
             error_message,
             adding,
+            search_query,
+            history,
+            network_online,
         ),
         ViewMode::Settings => build_settings_view(
             colors,
@@ -157,17 +163,28 @@ fn build_downloads_view<'a>(
     download_dir: &'a std::path::Path,
     error_message: Option<&'a str>,
     adding: bool,
+    search_query: &'a str,
+    _history: &'a DownloadHistory,
+    network_online: bool,
 ) -> Element<'a, Message> {
     let url_bar = build_url_bar(url_input, colors, adding);
     let filter_bar = build_filter_bar(filter, colors, counts);
 
+    let query_lower = search_query.to_lowercase();
     let filtered: Vec<&DownloadItem> = downloads
         .iter()
         .filter(|d| filter.matches(d.status))
+        .filter(|d| {
+            if search_query.is_empty() {
+                return true;
+            }
+            d.filename.to_lowercase().contains(&query_lower)
+                || d.url.to_lowercase().contains(&query_lower)
+        })
         .collect();
 
     let download_list = build_download_list(&filtered, selected, colors, is_dark);
-    let status_bar = build_status_bar(total_speed, counts, colors, download_dir);
+    let status_bar = build_status_bar(total_speed, counts, colors, download_dir, network_online);
 
     let mut content = Column::new()
         .spacing(6)
@@ -239,8 +256,48 @@ fn build_downloads_view<'a>(
         );
     }
 
+    if !network_online {
+        content = content.push(
+            container(
+                row![
+                    icon(Bootstrap::WifiOff).style(iced::theme::Text::Color(colors.warning)),
+                    Space::with_width(8),
+                    text(
+                        "Network offline — downloads will auto-resume when connection is restored"
+                    )
+                    .size(12)
+                    .style(iced::theme::Text::Color(colors.warning)),
+                ]
+                .align_items(Alignment::Center),
+            )
+            .width(Length::Fill)
+            .padding([8, 20])
+            .style(iced::theme::Container::Custom(Box::new(
+                move |_: &Theme| iced::widget::container::Appearance {
+                    text_color: None,
+                    background: Some(iced::Background::Color(Color::from_rgba(
+                        0.95, 0.75, 0.25, 0.06,
+                    ))),
+                    border: iced::Border {
+                        color: colors.warning,
+                        width: 1.0,
+                        radius: 6.0.into(),
+                    },
+                    shadow: Default::default(),
+                },
+            ))),
+        );
+    }
+
+    let search_bar = build_search_bar(search_query, colors);
+
     content = content
-        .push(filter_bar)
+        .push(
+            row![filter_bar, search_bar]
+                .align_items(Alignment::Center)
+                .spacing(8)
+                .width(Length::Fill),
+        )
         .push(download_list)
         .push(status_bar);
 
@@ -521,6 +578,28 @@ fn settings_divider(colors: ColorScheme) -> Element<'static, Message> {
             },
         )))
         .into()
+}
+
+fn build_search_bar<'a>(search_query: &'a str, colors: ColorScheme) -> Element<'a, Message> {
+    container(
+        text_input("Search...", search_query)
+            .on_input(Message::SearchChanged)
+            .padding([6, 10])
+            .size(12)
+            .width(Length::Fixed(180.0))
+            .icon(text_input::Icon {
+                font: iced_aw::BOOTSTRAP_FONT,
+                code_point: Bootstrap::Search.into(),
+                size: Some(iced::Pixels(12.0)),
+                spacing: 8.0,
+                side: text_input::Side::Left,
+            })
+            .style(iced::theme::TextInput::Custom(Box::new(TextInputStyle {
+                colors,
+            }))),
+    )
+    .padding([4, 8])
+    .into()
 }
 
 fn build_url_bar<'a>(url_input: &str, colors: ColorScheme, adding: bool) -> Element<'a, Message> {
@@ -979,6 +1058,7 @@ fn build_status_bar(
     counts: (usize, usize, usize, usize, usize),
     colors: ColorScheme,
     download_dir: &std::path::Path,
+    network_online: bool,
 ) -> Element<'static, Message> {
     let (total, active, completed, _paused, _failed) = counts;
 
@@ -986,6 +1066,17 @@ fn build_status_bar(
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("Downloads");
+
+    let net_icon = if network_online {
+        Bootstrap::Wifi
+    } else {
+        Bootstrap::WifiOff
+    };
+    let net_color = if network_online {
+        colors.success
+    } else {
+        colors.warning
+    };
 
     container(
         row![
@@ -1004,6 +1095,10 @@ fn build_status_bar(
                 colors,
             }))),
             Space::with_width(Length::Fill),
+            icon(net_icon)
+                .size(11)
+                .style(iced::theme::Text::Color(net_color)),
+            Space::with_width(12),
             text(format!("{} downloads", total))
                 .size(12)
                 .style(iced::theme::Text::Color(colors.text_disabled)),

@@ -150,6 +150,17 @@ pub struct PersistedDownload {
     pub scheduled_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    pub id: Uuid,
+    pub url: String,
+    pub filename: String,
+    pub save_path: PathBuf,
+    pub total_size: Option<u64>,
+    pub category: FileCategory,
+    pub completed_at: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct DownloadItem {
     pub id: Uuid,
@@ -554,5 +565,25 @@ mod tests {
         assert_eq!(ViewMode::Downloads, ViewMode::Downloads);
         assert_eq!(ViewMode::Settings, ViewMode::Settings);
         assert_ne!(ViewMode::Downloads, ViewMode::Settings);
+    }
+
+    #[test]
+    fn history_entry_serde_roundtrip() {
+        let entry = HistoryEntry {
+            id: Uuid::new_v4(),
+            url: "https://example.com/file.zip".to_string(),
+            filename: "file.zip".to_string(),
+            save_path: PathBuf::from("/tmp/file.zip"),
+            total_size: Some(1024),
+            category: FileCategory::Archive,
+            completed_at: "2025-03-06 18:00".to_string(),
+        };
+
+        let json = serde_json::to_string(&entry).unwrap();
+        let restored: HistoryEntry = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.id, entry.id);
+        assert_eq!(restored.filename, "file.zip");
+        assert_eq!(restored.completed_at, "2025-03-06 18:00");
     }
 }

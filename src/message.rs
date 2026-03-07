@@ -30,6 +30,9 @@ pub enum Message {
     ShowSettings,
     ShowDownloads,
 
+    // Search
+    SearchChanged(String),
+
     // Settings
     ChooseDownloadDir,
     DownloadDirChosen(Option<std::path::PathBuf>),
@@ -40,6 +43,9 @@ pub enum Message {
     // Scheduling
     ScheduleDownload(Uuid, String),
     ClearSchedule(Uuid),
+
+    // Network / auto-resume
+    NetworkStatus(bool),
 
     // Tray / window
     WindowCloseRequested,

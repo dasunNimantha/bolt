@@ -1,21 +1,25 @@
 use crate::download::engine::DownloadEngine;
 use crate::message::Message;
-use crate::model::{DownloadFilter, DownloadItem, ViewMode};
-use crate::settings::{AppSettings, DownloadDatabase};
+use crate::model::{DownloadFilter, DownloadItem, DownloadStatus, HistoryEntry, ViewMode};
+use crate::settings::{AppSettings, DownloadDatabase, DownloadHistory};
 use crate::theme::{bolt_theme, ThemeMode};
 use crate::tray::BoltTray;
 use crate::utils::format::format_speed;
 use crate::view::build_view;
+use chrono::Local;
 use iced::{event, window, Application, Command, Element, Event, Subscription, Theme};
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
+
+const NETWORK_CHECK_INTERVAL: u32 = 30;
 
 pub struct BoltApp {
     engine: Arc<DownloadEngine>,
     downloads: Vec<DownloadItem>,
     selected: Option<Uuid>,
     url_input: String,
+    search_query: String,
     filter: DownloadFilter,
     settings: AppSettings,
     total_speed: f64,
@@ -27,6 +31,9 @@ pub struct BoltApp {
     max_concurrent_input: String,
     persist_counter: u32,
     tray: Option<BoltTray>,
+    network_online: bool,
+    network_check_counter: u32,
+    history: DownloadHistory,
 }
 
 impl Application for BoltApp {
@@ -54,12 +61,14 @@ impl Application for BoltApp {
         let max_concurrent_input = format!("{}", settings.max_concurrent);
 
         let tray = BoltTray::new();
+        let history = DownloadHistory::load();
 
         let mut app = Self {
             engine,
             downloads: Vec::new(),
             selected: None,
             url_input: String::new(),
+            search_query: String::new(),
             filter: DownloadFilter::All,
             settings,
             total_speed: 0.0,
@@ -71,6 +80,9 @@ impl Application for BoltApp {
             max_concurrent_input,
             persist_counter: 0,
             tray,
+            network_online: true,
+            network_check_counter: 0,
+            history,
         };
         app.refresh_snapshots();
 
@@ -207,9 +219,11 @@ impl Application for BoltApp {
             }
 
             Message::ClearCompleted => {
+                self.record_completed_to_history();
                 self.engine.clear_completed();
                 self.refresh_snapshots();
                 self.save_downloads();
+                self.history.save();
                 Command::none()
             }
 
@@ -232,9 +246,19 @@ impl Application for BoltApp {
                 Command::none()
             }
 
+            Message::SearchChanged(query) => {
+                self.search_query = query;
+                Command::none()
+            }
+
             Message::Tick => {
                 self.engine.update_state();
+
+                // Check for newly completed downloads and add to history
+                let prev_downloads = self.downloads.clone();
                 self.refresh_snapshots();
+                self.check_newly_completed(&prev_downloads);
+
                 self.update_tray_tooltip();
 
                 self.persist_counter += 1;
@@ -270,6 +294,28 @@ impl Application for BoltApp {
                     }
                 }
 
+                // Network connectivity check for auto-resume
+                self.network_check_counter += 1;
+                let has_failed = self.counts.4 > 0;
+                if has_failed && self.network_check_counter >= NETWORK_CHECK_INTERVAL {
+                    self.network_check_counter = 0;
+                    let client = reqwest::Client::builder()
+                        .timeout(Duration::from_secs(5))
+                        .build()
+                        .unwrap_or_default();
+                    return Command::perform(
+                        async move {
+                            let ok = client
+                                .head("https://clients3.google.com/generate_204")
+                                .send()
+                                .await
+                                .is_ok();
+                            Message::NetworkStatus(ok)
+                        },
+                        |msg| msg,
+                    );
+                }
+
                 if let Some(ref tray) = self.tray {
                     if let Some(action) = tray.poll() {
                         return match action {
@@ -282,6 +328,29 @@ impl Application for BoltApp {
                                 window::close(window::Id::MAIN)
                             }
                         };
+                    }
+                }
+
+                Command::none()
+            }
+
+            Message::NetworkStatus(online) => {
+                let was_offline = !self.network_online;
+                self.network_online = online;
+
+                if online && was_offline {
+                    let failed_ids = self.engine.get_failed_ids();
+                    if !failed_ids.is_empty() {
+                        let engine = self.engine.clone();
+                        return Command::perform(
+                            async move {
+                                for id in failed_ids {
+                                    let _ = engine.retry(id).await;
+                                }
+                                Message::Tick
+                            },
+                            |msg| msg,
+                        );
                     }
                 }
 
@@ -422,6 +491,9 @@ impl Application for BoltApp {
             &self.settings,
             &self.speed_limit_input,
             &self.max_concurrent_input,
+            &self.search_query,
+            &self.history,
+            self.network_online,
         )
     }
 
@@ -432,15 +504,16 @@ impl Application for BoltApp {
         });
 
         let has_active = self.counts.1 > 0;
-        let has_scheduled = self.downloads.iter().any(|d| {
-            d.scheduled_at.is_some()
-                && d.status == crate::model::DownloadStatus::Queued
-        });
+        let has_failed = self.counts.4 > 0;
+        let has_scheduled = self
+            .downloads
+            .iter()
+            .any(|d| d.scheduled_at.is_some() && d.status == crate::model::DownloadStatus::Queued);
         let has_tray = self.tray.is_some();
 
         let tick_sub = if has_active {
             iced::time::every(Duration::from_millis(250)).map(|_| Message::Tick)
-        } else if has_scheduled || has_tray {
+        } else if has_scheduled || has_tray || has_failed {
             iced::time::every(Duration::from_millis(500)).map(|_| Message::Tick)
         } else {
             Subscription::none()
@@ -465,6 +538,53 @@ impl BoltApp {
     fn save_downloads(&self) {
         let db = self.engine.persist();
         db.save();
+    }
+
+    fn check_newly_completed(&mut self, prev: &[DownloadItem]) {
+        let mut changed = false;
+        for dl in &self.downloads {
+            if dl.status == DownloadStatus::Completed {
+                let was_completed = prev
+                    .iter()
+                    .any(|p| p.id == dl.id && p.status == DownloadStatus::Completed);
+                if !was_completed {
+                    self.history.add(HistoryEntry {
+                        id: dl.id,
+                        url: dl.url.clone(),
+                        filename: dl.filename.clone(),
+                        save_path: dl.save_path.clone(),
+                        total_size: dl.total_size,
+                        category: dl.category,
+                        completed_at: Local::now().format("%Y-%m-%d %H:%M").to_string(),
+                    });
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            self.history.save();
+        }
+    }
+
+    fn record_completed_to_history(&mut self) {
+        let mut changed = false;
+        for dl in &self.downloads {
+            if dl.status == DownloadStatus::Completed {
+                self.history.add(HistoryEntry {
+                    id: dl.id,
+                    url: dl.url.clone(),
+                    filename: dl.filename.clone(),
+                    save_path: dl.save_path.clone(),
+                    total_size: dl.total_size,
+                    category: dl.category,
+                    completed_at: Local::now().format("%Y-%m-%d %H:%M").to_string(),
+                });
+                changed = true;
+            }
+        }
+        if changed {
+            self.history.save();
+        }
     }
 
     fn update_tray_tooltip(&self) {

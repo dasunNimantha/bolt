@@ -538,6 +538,15 @@ impl DownloadEngine {
             .collect()
     }
 
+    pub fn get_failed_ids(&self) -> Vec<Uuid> {
+        let downloads = self.state.lock().unwrap();
+        downloads
+            .iter()
+            .filter(|d| d.status == DownloadStatus::Failed)
+            .map(|d| d.id)
+            .collect()
+    }
+
     pub fn update_state(&self) {
         let mut downloads = self.state.lock().unwrap();
         for dl in downloads.iter_mut() {
@@ -1279,5 +1288,63 @@ mod tests {
 
         let auto = engine.auto_start_queued();
         assert!(auto.is_empty());
+    }
+
+    #[test]
+    fn engine_get_failed_ids() {
+        use crate::model::{PersistedDownload, PersistedSegment};
+        use crate::settings::DownloadDatabase;
+
+        let id_failed = Uuid::new_v4();
+        let id_paused = Uuid::new_v4();
+        let db = DownloadDatabase::from_persisted(vec![
+            PersistedDownload {
+                id: id_failed,
+                url: "https://example.com/a.bin".to_string(),
+                filename: "a.bin".to_string(),
+                save_path: PathBuf::from("/tmp/a.bin"),
+                total_size: Some(1024),
+                status: DownloadStatus::Failed,
+                segments: vec![PersistedSegment {
+                    start: 0,
+                    end: 1024,
+                    downloaded: 100,
+                }],
+                category: FileCategory::Other,
+                error: Some("timeout".to_string()),
+                resumable: true,
+                scheduled_at: None,
+            },
+            PersistedDownload {
+                id: id_paused,
+                url: "https://example.com/b.bin".to_string(),
+                filename: "b.bin".to_string(),
+                save_path: PathBuf::from("/tmp/b.bin"),
+                total_size: Some(2048),
+                status: DownloadStatus::Paused,
+                segments: vec![PersistedSegment {
+                    start: 0,
+                    end: 2048,
+                    downloaded: 512,
+                }],
+                category: FileCategory::Other,
+                error: None,
+                resumable: true,
+                scheduled_at: None,
+            },
+        ]);
+
+        let engine = DownloadEngine::new();
+        engine.restore_downloads(&db);
+
+        let failed = engine.get_failed_ids();
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0], id_failed);
+    }
+
+    #[test]
+    fn engine_get_failed_ids_empty() {
+        let engine = DownloadEngine::new();
+        assert!(engine.get_failed_ids().is_empty());
     }
 }

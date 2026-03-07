@@ -5,22 +5,15 @@ Fast multi-threaded download manager for Linux, Windows and macOS. Built with Ru
 ## Features
 
 - **Multi-segment downloading** -- splits files into up to 8 parallel segments for maximum throughput
-- **Pause / Resume** -- stop and continue downloads without losing progress
-- **Download persistence** -- saves download state to disk and restores on restart
-- **Speed limiting** -- configurable bandwidth cap (KB/s) with smooth per-chunk throttling
-- **Concurrent download limits** -- control how many downloads run simultaneously (1–10)
-- **Download scheduling** -- schedule downloads to start at a specific date and time
-- **System tray** -- minimizes to tray on close when downloads are active; live tooltip with speed/status
-- **Auto-retry** -- failed segments retry automatically with exponential backoff (up to 3 attempts)
-- **Auto-start queued** -- queued downloads start automatically when a slot opens
-- **Queue management** -- add links without starting them immediately, start when ready
-- **Connection optimization** -- aggressive keep-alive, connection pooling, TCP nodelay
-- **Buffered I/O** -- 256KB write batching for fewer syscalls and higher disk throughput
-- **File type detection** -- automatic categorization (video, audio, document, archive, image, app)
-- **Dark / Light theme** -- toggle between themes in settings
-- **Settings page** -- grouped, card-based settings UI for downloads, appearance, and preferences
-- **Configurable download directory** -- pick any folder via native file dialog
-- **Cross-platform** -- runs on Linux, Windows and macOS
+- **Pause, resume & persistence** -- stop and continue downloads without losing progress; state survives restarts
+- **Speed limiting & concurrency** -- configurable bandwidth cap (KB/s) and simultaneous download limit (1–10)
+- **Download scheduling** -- queue downloads to start automatically at a specific date and time
+- **System tray & background mode** -- minimizes to tray on close; live tooltip with speed/status
+- **Auto-resume on reconnect** -- detects network recovery and retries failed downloads automatically
+- **Search & history** -- filter downloads by name or URL; completed downloads are tracked in persistent history
+- **Smart queue management** -- auto-start queued downloads when slots open, auto-retry failed segments
+- **Dark / Light theme** -- toggle between themes in a grouped, card-based settings page
+- **Cross-platform** -- runs on Linux, Windows and macOS with native file dialogs and file-type detection
 
 ## Building
 
