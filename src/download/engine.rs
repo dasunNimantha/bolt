@@ -39,6 +39,12 @@ pub struct DownloadEngine {
     client: reqwest::Client,
 }
 
+impl Default for DownloadEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DownloadEngine {
     pub fn new() -> Self {
         let client = reqwest::Client::builder()
@@ -505,8 +511,8 @@ fn extract_filename(response: &reqwest::Response, url: &str) -> String {
     }
 
     if let Ok(parsed) = url::Url::parse(url) {
-        if let Some(segments) = parsed.path_segments() {
-            if let Some(last) = segments.last() {
+        if let Some(mut segments) = parsed.path_segments() {
+            if let Some(last) = segments.next_back() {
                 let decoded = urldecode(last);
                 if !decoded.is_empty() && decoded != "/" {
                     return decoded;
@@ -553,11 +559,12 @@ fn urldecode(s: &str) -> String {
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_snapshot(
     id: Uuid,
     url: &str,
     filename: &str,
-    save_path: &PathBuf,
+    save_path: &std::path::Path,
     total_size: Option<u64>,
     status: DownloadStatus,
     segments: &[SegmentState],
@@ -591,7 +598,7 @@ fn build_snapshot(
         id,
         url: url.to_string(),
         filename: filename.to_string(),
-        save_path: save_path.clone(),
+        save_path: save_path.to_path_buf(),
         total_size,
         downloaded: total_downloaded,
         status,

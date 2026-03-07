@@ -159,6 +159,12 @@ pub struct SpeedTracker {
     max_samples: usize,
 }
 
+impl Default for SpeedTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SpeedTracker {
     pub fn new() -> Self {
         Self {

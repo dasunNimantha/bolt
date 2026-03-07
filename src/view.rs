@@ -24,6 +24,7 @@ fn icon_sized(bootstrap: Bootstrap, size: f32) -> iced::widget::Text<'static> {
     icon_to_text(bootstrap).size(size)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_view<'a>(
     downloads: &'a [DownloadItem],
     filter: DownloadFilter,

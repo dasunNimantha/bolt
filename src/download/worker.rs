@@ -10,6 +10,7 @@ use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 const MAX_RETRIES: u32 = 3;
 const WRITE_BUF_SIZE: usize = 256 * 1024;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn download_segment(
     client: reqwest::Client,
     url: String,
@@ -62,6 +63,7 @@ async fn flush_buf(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn try_download_segment(
     client: &reqwest::Client,
     url: &str,
@@ -94,6 +96,7 @@ async fn try_download_segment(
 
     let mut file = tokio::fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .write(true)
         .open(file_path)
         .await?;
