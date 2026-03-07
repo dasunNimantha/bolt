@@ -37,6 +37,7 @@ pub struct BoltApp {
     tray: Option<BoltTray>,
     network_online: bool,
     network_check_counter: u32,
+    network_client: reqwest::Client,
     history: DownloadHistory,
     /// Tracks whether we were inside the schedule window on the previous check,
     /// so we only trigger auto-start on the outside→inside transition.
@@ -99,6 +100,10 @@ impl Application for BoltApp {
             tray,
             network_online: true,
             network_check_counter: 0,
+            network_client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .unwrap_or_default(),
             history,
             schedule_was_active,
         };
@@ -273,9 +278,14 @@ impl Application for BoltApp {
                 self.engine.update_state();
 
                 // Check for newly completed downloads and add to history
-                let prev_downloads = self.downloads.clone();
+                let prev_completed: std::collections::HashSet<Uuid> = self
+                    .downloads
+                    .iter()
+                    .filter(|d| d.status == DownloadStatus::Completed)
+                    .map(|d| d.id)
+                    .collect();
                 self.refresh_snapshots();
-                self.check_newly_completed(&prev_downloads);
+                self.check_newly_completed(&prev_completed);
 
                 self.update_tray_tooltip();
 
@@ -324,10 +334,7 @@ impl Application for BoltApp {
                 self.network_check_counter += 1;
                 if self.network_check_counter >= NETWORK_CHECK_INTERVAL {
                     self.network_check_counter = 0;
-                    let client = reqwest::Client::builder()
-                        .timeout(Duration::from_secs(5))
-                        .build()
-                        .unwrap_or_default();
+                    let client = self.network_client.clone();
                     return Command::perform(
                         async move {
                             let ok = client
@@ -428,8 +435,8 @@ impl Application for BoltApp {
             }
 
             Message::SetMaxConcurrent(val) => {
-                self.max_concurrent_input = val.clone();
-                if let Ok(n) = val.parse::<usize>() {
+                self.max_concurrent_input = val;
+                if let Ok(n) = self.max_concurrent_input.parse::<usize>() {
                     let n = n.clamp(1, 10);
                     self.settings.max_concurrent = n;
                     self.engine.set_max_concurrent(n as u64);
@@ -439,12 +446,12 @@ impl Application for BoltApp {
             }
 
             Message::SetSpeedLimit(val) => {
-                self.speed_limit_input = val.clone();
-                if val.is_empty() {
+                self.speed_limit_input = val;
+                if self.speed_limit_input.is_empty() {
                     self.settings.speed_limit = None;
                     self.engine.set_speed_limit(0);
                     self.settings.save();
-                } else if let Ok(kb) = val.parse::<u64>() {
+                } else if let Ok(kb) = self.speed_limit_input.parse::<u64>() {
                     let bps = kb * 1024;
                     self.settings.speed_limit = Some(bps);
                     self.engine.set_speed_limit(bps);
@@ -468,32 +475,32 @@ impl Application for BoltApp {
             }
 
             Message::SetScheduleFromH(val) => {
-                self.sched_from_h = val.clone();
-                if let Ok(h) = val.parse::<u8>() {
+                self.sched_from_h = val;
+                if let Ok(h) = self.sched_from_h.parse::<u8>() {
                     self.settings.schedule_from.0 = h.min(23);
                     self.settings.save();
                 }
                 Command::none()
             }
             Message::SetScheduleFromM(val) => {
-                self.sched_from_m = val.clone();
-                if let Ok(m) = val.parse::<u8>() {
+                self.sched_from_m = val;
+                if let Ok(m) = self.sched_from_m.parse::<u8>() {
                     self.settings.schedule_from.1 = m.min(59);
                     self.settings.save();
                 }
                 Command::none()
             }
             Message::SetScheduleToH(val) => {
-                self.sched_to_h = val.clone();
-                if let Ok(h) = val.parse::<u8>() {
+                self.sched_to_h = val;
+                if let Ok(h) = self.sched_to_h.parse::<u8>() {
                     self.settings.schedule_to.0 = h.min(23);
                     self.settings.save();
                 }
                 Command::none()
             }
             Message::SetScheduleToM(val) => {
-                self.sched_to_m = val.clone();
-                if let Ok(m) = val.parse::<u8>() {
+                self.sched_to_m = val;
+                if let Ok(m) = self.sched_to_m.parse::<u8>() {
                     self.settings.schedule_to.1 = m.min(59);
                     self.settings.save();
                 }
@@ -592,25 +599,20 @@ impl BoltApp {
         db.save();
     }
 
-    fn check_newly_completed(&mut self, prev: &[DownloadItem]) {
+    fn check_newly_completed(&mut self, prev_completed: &std::collections::HashSet<Uuid>) {
         let mut changed = false;
         for dl in &self.downloads {
-            if dl.status == DownloadStatus::Completed {
-                let was_completed = prev
-                    .iter()
-                    .any(|p| p.id == dl.id && p.status == DownloadStatus::Completed);
-                if !was_completed {
-                    self.history.add(HistoryEntry {
-                        id: dl.id,
-                        url: dl.url.clone(),
-                        filename: dl.filename.clone(),
-                        save_path: dl.save_path.clone(),
-                        total_size: dl.total_size,
-                        category: dl.category,
-                        completed_at: Local::now().format("%Y-%m-%d %H:%M").to_string(),
-                    });
-                    changed = true;
-                }
+            if dl.status == DownloadStatus::Completed && !prev_completed.contains(&dl.id) {
+                self.history.add(HistoryEntry {
+                    id: dl.id,
+                    url: dl.url.clone(),
+                    filename: dl.filename.clone(),
+                    save_path: dl.save_path.clone(),
+                    total_size: dl.total_size,
+                    category: dl.category,
+                    completed_at: Local::now().format("%Y-%m-%d %H:%M").to_string(),
+                });
+                changed = true;
             }
         }
         if changed {

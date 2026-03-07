@@ -1,3 +1,4 @@
+use chrono::Timelike;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -54,14 +55,10 @@ impl AppSettings {
         if !self.schedule_enabled {
             return true;
         }
-        let now = chrono::Local::now();
-        let cur_h = now.format("%H").to_string().parse::<u8>().unwrap_or(0);
-        let cur_m = now.format("%M").to_string().parse::<u8>().unwrap_or(0);
-        let (from_h, from_m) = self.schedule_from;
-        let (to_h, to_m) = self.schedule_to;
-        let cur_min = cur_h as u16 * 60 + cur_m as u16;
-        let from_min = from_h as u16 * 60 + from_m as u16;
-        let to_min = to_h as u16 * 60 + to_m as u16;
+        let now = chrono::Local::now().time();
+        let cur_min = now.hour() as u16 * 60 + now.minute() as u16;
+        let from_min = self.schedule_from.0 as u16 * 60 + self.schedule_from.1 as u16;
+        let to_min = self.schedule_to.0 as u16 * 60 + self.schedule_to.1 as u16;
 
         if from_min <= to_min {
             (from_min..=to_min).contains(&cur_min)

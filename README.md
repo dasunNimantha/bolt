@@ -7,7 +7,7 @@ Fast multi-threaded download manager for Linux, Windows and macOS. Built with Ru
 - **Multi-segment downloading** -- splits files into up to 8 parallel segments for maximum throughput
 - **Pause, resume & persistence** -- stop and continue downloads without losing progress; state survives restarts
 - **Speed limiting & concurrency** -- configurable bandwidth cap (KB/s) and simultaneous download limit (1–10)
-- **Download scheduling** -- queue downloads to start automatically at a specific date and time
+- **Download scheduling** -- set a daily time window to auto-start all queued downloads
 - **System tray & background mode** -- minimizes to tray on close; live tooltip with speed/status
 - **Auto-resume on reconnect** -- detects network recovery and retries failed downloads automatically
 - **Search & history** -- filter downloads by name or URL; completed downloads are tracked in persistent history
