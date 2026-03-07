@@ -129,24 +129,24 @@ pub fn bolt_theme(mode: ThemeMode) -> Theme {
 // ============== Container Styles ==============
 
 pub struct CardStyle {
-    pub mode: ThemeMode,
+    pub colors: ColorScheme,
+    pub is_dark: bool,
 }
 
 impl iced::widget::container::StyleSheet for CardStyle {
     type Style = iced::Theme;
 
     fn appearance(&self, _style: &Self::Style) -> iced::widget::container::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::container::Appearance {
-            text_color: Some(colors.text_primary),
-            background: Some(iced::Background::Color(colors.surface_elevated)),
+            text_color: Some(self.colors.text_primary),
+            background: Some(iced::Background::Color(self.colors.surface_elevated)),
             border: iced::Border {
-                color: colors.border_light,
+                color: self.colors.border_light,
                 width: 1.0,
                 radius: 12.0.into(),
             },
             shadow: iced::Shadow {
-                color: if self.mode == ThemeMode::Dark {
+                color: if self.is_dark {
                     Color::from_rgba(0.0, 0.0, 0.0, 0.15)
                 } else {
                     Color::from_rgba(0.0, 0.0, 0.0, 0.08)
@@ -159,19 +159,18 @@ impl iced::widget::container::StyleSheet for CardStyle {
 }
 
 pub struct PanelStyle {
-    pub mode: ThemeMode,
+    pub colors: ColorScheme,
 }
 
 impl iced::widget::container::StyleSheet for PanelStyle {
     type Style = iced::Theme;
 
     fn appearance(&self, _style: &Self::Style) -> iced::widget::container::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::container::Appearance {
-            text_color: Some(colors.text_primary),
-            background: Some(iced::Background::Color(colors.surface)),
+            text_color: Some(self.colors.text_primary),
+            background: Some(iced::Background::Color(self.colors.surface)),
             border: iced::Border {
-                color: colors.border,
+                color: self.colors.border,
                 width: 1.0,
                 radius: 8.0.into(),
             },
@@ -181,7 +180,8 @@ impl iced::widget::container::StyleSheet for PanelStyle {
 }
 
 pub struct DownloadCardStyle {
-    pub mode: ThemeMode,
+    pub colors: ColorScheme,
+    pub is_dark: bool,
     pub is_selected: bool,
 }
 
@@ -189,31 +189,30 @@ impl iced::widget::container::StyleSheet for DownloadCardStyle {
     type Style = iced::Theme;
 
     fn appearance(&self, _style: &Self::Style) -> iced::widget::container::Appearance {
-        let colors = get_colors(self.mode);
         let bg_color = if self.is_selected {
-            if self.mode == ThemeMode::Dark {
+            if self.is_dark {
                 Color::from_rgba(0.95, 0.75, 0.25, 0.12)
             } else {
                 Color::from_rgba(0.85, 0.60, 0.10, 0.12)
             }
         } else {
-            colors.surface
+            self.colors.surface
         };
 
         iced::widget::container::Appearance {
-            text_color: Some(colors.text_primary),
+            text_color: Some(self.colors.text_primary),
             background: Some(iced::Background::Color(bg_color)),
             border: iced::Border {
                 color: if self.is_selected {
-                    colors.accent_primary
+                    self.colors.accent_primary
                 } else {
-                    colors.border_light
+                    self.colors.border_light
                 },
                 width: 1.0,
                 radius: 10.0.into(),
             },
             shadow: iced::Shadow {
-                color: if self.mode == ThemeMode::Dark {
+                color: if self.is_dark {
                     Color::from_rgba(0.0, 0.0, 0.0, 0.1)
                 } else {
                     Color::from_rgba(0.0, 0.0, 0.0, 0.05)
@@ -249,16 +248,15 @@ impl iced::widget::container::StyleSheet for StatusBadgeStyle {
 // ============== Button Styles ==============
 
 pub struct PrimaryButtonStyle {
-    pub mode: ThemeMode,
+    pub colors: ColorScheme,
 }
 
 impl iced::widget::button::StyleSheet for PrimaryButtonStyle {
     type Style = iced::Theme;
 
     fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::button::Appearance {
-            background: Some(iced::Background::Color(colors.accent_primary)),
+            background: Some(iced::Background::Color(self.colors.accent_primary)),
             border: iced::Border {
                 color: Color::TRANSPARENT,
                 width: 0.0,
@@ -272,44 +270,40 @@ impl iced::widget::button::StyleSheet for PrimaryButtonStyle {
 
     fn hovered(&self, style: &Self::Style) -> iced::widget::button::Appearance {
         let mut appearance = self.active(style);
-        let colors = get_colors(self.mode);
-        appearance.background = Some(iced::Background::Color(colors.accent_hover));
+        appearance.background = Some(iced::Background::Color(self.colors.accent_hover));
         appearance
     }
 
     fn pressed(&self, style: &Self::Style) -> iced::widget::button::Appearance {
         let mut appearance = self.active(style);
-        let colors = get_colors(self.mode);
-        appearance.background = Some(iced::Background::Color(colors.accent_dark));
+        appearance.background = Some(iced::Background::Color(self.colors.accent_dark));
         appearance
     }
 
     fn disabled(&self, style: &Self::Style) -> iced::widget::button::Appearance {
         let mut appearance = self.active(style);
-        let colors = get_colors(self.mode);
-        appearance.background = Some(iced::Background::Color(colors.bg_tertiary));
-        appearance.text_color = colors.text_disabled;
+        appearance.background = Some(iced::Background::Color(self.colors.bg_tertiary));
+        appearance.text_color = self.colors.text_disabled;
         appearance
     }
 }
 
 pub struct SecondaryButtonStyle {
-    pub mode: ThemeMode,
+    pub colors: ColorScheme,
 }
 
 impl iced::widget::button::StyleSheet for SecondaryButtonStyle {
     type Style = iced::Theme;
 
     fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::button::Appearance {
-            background: Some(iced::Background::Color(colors.surface)),
+            background: Some(iced::Background::Color(self.colors.surface)),
             border: iced::Border {
-                color: colors.border,
+                color: self.colors.border,
                 width: 1.0,
                 radius: 8.0.into(),
             },
-            text_color: colors.text_primary,
+            text_color: self.colors.text_primary,
             shadow: Default::default(),
             shadow_offset: iced::Vector::new(0.0, 0.0),
         }
@@ -317,45 +311,41 @@ impl iced::widget::button::StyleSheet for SecondaryButtonStyle {
 
     fn hovered(&self, style: &Self::Style) -> iced::widget::button::Appearance {
         let mut appearance = self.active(style);
-        let colors = get_colors(self.mode);
-        appearance.background = Some(iced::Background::Color(colors.surface_hover));
-        appearance.border.color = colors.accent_primary;
+        appearance.background = Some(iced::Background::Color(self.colors.surface_hover));
+        appearance.border.color = self.colors.accent_primary;
         appearance
     }
 
     fn pressed(&self, style: &Self::Style) -> iced::widget::button::Appearance {
         let mut appearance = self.active(style);
-        let colors = get_colors(self.mode);
-        appearance.background = Some(iced::Background::Color(colors.surface_active));
+        appearance.background = Some(iced::Background::Color(self.colors.surface_active));
         appearance
     }
 
     fn disabled(&self, style: &Self::Style) -> iced::widget::button::Appearance {
         let mut appearance = self.active(style);
-        let colors = get_colors(self.mode);
-        appearance.background = Some(iced::Background::Color(colors.bg_tertiary));
-        appearance.text_color = colors.text_disabled;
+        appearance.background = Some(iced::Background::Color(self.colors.bg_tertiary));
+        appearance.text_color = self.colors.text_disabled;
         appearance
     }
 }
 
 pub struct DangerButtonStyle {
-    pub mode: ThemeMode,
+    pub colors: ColorScheme,
 }
 
 impl iced::widget::button::StyleSheet for DangerButtonStyle {
     type Style = iced::Theme;
 
     fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::button::Appearance {
-            background: Some(iced::Background::Color(colors.surface)),
+            background: Some(iced::Background::Color(self.colors.surface)),
             border: iced::Border {
-                color: colors.border,
+                color: self.colors.border,
                 width: 1.0,
                 radius: 8.0.into(),
             },
-            text_color: colors.text_secondary,
+            text_color: self.colors.text_secondary,
             shadow: Default::default(),
             shadow_offset: iced::Vector::new(0.0, 0.0),
         }
@@ -392,15 +382,14 @@ impl iced::widget::button::StyleSheet for DangerButtonStyle {
     }
 
     fn disabled(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::button::Appearance {
-            background: Some(iced::Background::Color(colors.bg_tertiary)),
+            background: Some(iced::Background::Color(self.colors.bg_tertiary)),
             border: iced::Border {
-                color: colors.border,
+                color: self.colors.border,
                 width: 1.0,
                 radius: 8.0.into(),
             },
-            text_color: colors.text_disabled,
+            text_color: self.colors.text_disabled,
             shadow: Default::default(),
             shadow_offset: iced::Vector::new(0.0, 0.0),
         }
@@ -408,14 +397,13 @@ impl iced::widget::button::StyleSheet for DangerButtonStyle {
 }
 
 pub struct IconButtonStyle {
-    pub mode: ThemeMode,
+    pub colors: ColorScheme,
 }
 
 impl iced::widget::button::StyleSheet for IconButtonStyle {
     type Style = iced::Theme;
 
     fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::button::Appearance {
             background: Some(iced::Background::Color(Color::TRANSPARENT)),
             border: iced::Border {
@@ -423,48 +411,45 @@ impl iced::widget::button::StyleSheet for IconButtonStyle {
                 width: 0.0,
                 radius: 6.0.into(),
             },
-            text_color: colors.text_secondary,
+            text_color: self.colors.text_secondary,
             shadow: Default::default(),
             shadow_offset: iced::Vector::new(0.0, 0.0),
         }
     }
 
     fn hovered(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::button::Appearance {
-            background: Some(iced::Background::Color(colors.surface_hover)),
+            background: Some(iced::Background::Color(self.colors.surface_hover)),
             border: iced::Border {
                 color: Color::TRANSPARENT,
                 width: 0.0,
                 radius: 6.0.into(),
             },
-            text_color: colors.accent_primary,
+            text_color: self.colors.accent_primary,
             shadow: Default::default(),
             shadow_offset: iced::Vector::new(0.0, 0.0),
         }
     }
 
     fn pressed(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::button::Appearance {
-            background: Some(iced::Background::Color(colors.surface_active)),
+            background: Some(iced::Background::Color(self.colors.surface_active)),
             border: iced::Border {
                 color: Color::TRANSPARENT,
                 width: 0.0,
                 radius: 6.0.into(),
             },
-            text_color: colors.accent_dark,
+            text_color: self.colors.accent_dark,
             shadow: Default::default(),
             shadow_offset: iced::Vector::new(0.0, 0.0),
         }
     }
 
     fn disabled(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::button::Appearance {
             background: Some(iced::Background::Color(Color::TRANSPARENT)),
             border: iced::Border::default(),
-            text_color: colors.text_disabled,
+            text_color: self.colors.text_disabled,
             shadow: Default::default(),
             shadow_offset: iced::Vector::new(0.0, 0.0),
         }
@@ -472,7 +457,7 @@ impl iced::widget::button::StyleSheet for IconButtonStyle {
 }
 
 pub struct FilterButtonStyle {
-    pub mode: ThemeMode,
+    pub colors: ColorScheme,
     pub is_active: bool,
 }
 
@@ -480,10 +465,9 @@ impl iced::widget::button::StyleSheet for FilterButtonStyle {
     type Style = iced::Theme;
 
     fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
-        let colors = get_colors(self.mode);
         if self.is_active {
             iced::widget::button::Appearance {
-                background: Some(iced::Background::Color(colors.accent_primary)),
+                background: Some(iced::Background::Color(self.colors.accent_primary)),
                 border: iced::Border {
                     color: Color::TRANSPARENT,
                     width: 0.0,
@@ -495,13 +479,13 @@ impl iced::widget::button::StyleSheet for FilterButtonStyle {
             }
         } else {
             iced::widget::button::Appearance {
-                background: Some(iced::Background::Color(colors.bg_tertiary)),
+                background: Some(iced::Background::Color(self.colors.bg_tertiary)),
                 border: iced::Border {
-                    color: colors.border_light,
+                    color: self.colors.border_light,
                     width: 1.0,
                     radius: 6.0.into(),
                 },
-                text_color: colors.text_secondary,
+                text_color: self.colors.text_secondary,
                 shadow: Default::default(),
                 shadow_offset: iced::Vector::new(0.0, 0.0),
             }
@@ -509,10 +493,9 @@ impl iced::widget::button::StyleSheet for FilterButtonStyle {
     }
 
     fn hovered(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
-        let colors = get_colors(self.mode);
         if self.is_active {
             iced::widget::button::Appearance {
-                background: Some(iced::Background::Color(colors.accent_hover)),
+                background: Some(iced::Background::Color(self.colors.accent_hover)),
                 border: iced::Border {
                     color: Color::TRANSPARENT,
                     width: 0.0,
@@ -524,13 +507,13 @@ impl iced::widget::button::StyleSheet for FilterButtonStyle {
             }
         } else {
             iced::widget::button::Appearance {
-                background: Some(iced::Background::Color(colors.bg_hover)),
+                background: Some(iced::Background::Color(self.colors.bg_hover)),
                 border: iced::Border {
-                    color: colors.border,
+                    color: self.colors.border,
                     width: 1.0,
                     radius: 6.0.into(),
                 },
-                text_color: colors.text_primary,
+                text_color: self.colors.text_primary,
                 shadow: Default::default(),
                 shadow_offset: iced::Vector::new(0.0, 0.0),
             }
@@ -549,44 +532,42 @@ impl iced::widget::button::StyleSheet for FilterButtonStyle {
 // ============== Input Styles ==============
 
 pub struct TextInputStyle {
-    pub mode: ThemeMode,
+    pub colors: ColorScheme,
 }
 
 impl iced::widget::text_input::StyleSheet for TextInputStyle {
     type Style = iced::Theme;
 
     fn active(&self, _style: &Self::Style) -> iced::widget::text_input::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::text_input::Appearance {
-            background: iced::Background::Color(colors.bg_secondary),
+            background: iced::Background::Color(self.colors.bg_secondary),
             border: iced::Border {
-                color: colors.border,
+                color: self.colors.border,
                 width: 1.0,
                 radius: 8.0.into(),
             },
-            icon_color: colors.text_secondary,
+            icon_color: self.colors.text_secondary,
         }
     }
 
     fn focused(&self, _style: &Self::Style) -> iced::widget::text_input::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::text_input::Appearance {
-            background: iced::Background::Color(colors.bg_secondary),
+            background: iced::Background::Color(self.colors.bg_secondary),
             border: iced::Border {
-                color: colors.border_focus,
+                color: self.colors.border_focus,
                 width: 2.0,
                 radius: 8.0.into(),
             },
-            icon_color: colors.accent_primary,
+            icon_color: self.colors.accent_primary,
         }
     }
 
     fn placeholder_color(&self, _style: &Self::Style) -> Color {
-        get_colors(self.mode).text_disabled
+        self.colors.text_disabled
     }
 
     fn value_color(&self, _style: &Self::Style) -> Color {
-        get_colors(self.mode).text_primary
+        self.colors.text_primary
     }
 
     fn selection_color(&self, _style: &Self::Style) -> Color {
@@ -595,81 +576,76 @@ impl iced::widget::text_input::StyleSheet for TextInputStyle {
 
     fn disabled(&self, style: &Self::Style) -> iced::widget::text_input::Appearance {
         let mut appearance = self.active(style);
-        let colors = get_colors(self.mode);
-        appearance.background = iced::Background::Color(colors.bg_tertiary);
+        appearance.background = iced::Background::Color(self.colors.bg_tertiary);
         appearance
     }
 
     fn disabled_color(&self, _style: &Self::Style) -> Color {
-        get_colors(self.mode).text_disabled
+        self.colors.text_disabled
     }
 }
 
 // ============== Progress Bar Style ==============
 
 pub struct ProgressBarStyle {
-    pub mode: ThemeMode,
+    pub colors: ColorScheme,
 }
 
 impl iced::widget::progress_bar::StyleSheet for ProgressBarStyle {
     type Style = iced::Theme;
 
     fn appearance(&self, _style: &Self::Style) -> iced::widget::progress_bar::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::progress_bar::Appearance {
-            background: iced::Background::Color(colors.bg_tertiary),
-            bar: iced::Background::Color(colors.accent_primary),
+            background: iced::Background::Color(self.colors.bg_tertiary),
+            bar: iced::Background::Color(self.colors.accent_primary),
             border_radius: 4.0.into(),
         }
     }
 }
 
 pub struct ProgressBarPausedStyle {
-    pub mode: ThemeMode,
+    pub colors: ColorScheme,
 }
 
 impl iced::widget::progress_bar::StyleSheet for ProgressBarPausedStyle {
     type Style = iced::Theme;
 
     fn appearance(&self, _style: &Self::Style) -> iced::widget::progress_bar::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::progress_bar::Appearance {
-            background: iced::Background::Color(colors.bg_tertiary),
-            bar: iced::Background::Color(colors.warning),
+            background: iced::Background::Color(self.colors.bg_tertiary),
+            bar: iced::Background::Color(self.colors.warning),
             border_radius: 4.0.into(),
         }
     }
 }
 
 pub struct ProgressBarCompleteStyle {
-    pub mode: ThemeMode,
+    pub colors: ColorScheme,
 }
 
 impl iced::widget::progress_bar::StyleSheet for ProgressBarCompleteStyle {
     type Style = iced::Theme;
 
     fn appearance(&self, _style: &Self::Style) -> iced::widget::progress_bar::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::progress_bar::Appearance {
-            background: iced::Background::Color(colors.bg_tertiary),
-            bar: iced::Background::Color(colors.success),
+            background: iced::Background::Color(self.colors.bg_tertiary),
+            bar: iced::Background::Color(self.colors.success),
             border_radius: 4.0.into(),
         }
     }
 }
 
 pub struct ProgressBarErrorStyle {
-    pub mode: ThemeMode,
+    pub colors: ColorScheme,
 }
 
 impl iced::widget::progress_bar::StyleSheet for ProgressBarErrorStyle {
     type Style = iced::Theme;
 
     fn appearance(&self, _style: &Self::Style) -> iced::widget::progress_bar::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::progress_bar::Appearance {
-            background: iced::Background::Color(colors.bg_tertiary),
-            bar: iced::Background::Color(colors.error),
+            background: iced::Background::Color(self.colors.bg_tertiary),
+            bar: iced::Background::Color(self.colors.error),
             border_radius: 4.0.into(),
         }
     }
@@ -678,21 +654,20 @@ impl iced::widget::progress_bar::StyleSheet for ProgressBarErrorStyle {
 // ============== Scrollable Style ==============
 
 pub struct ScrollableStyle {
-    pub mode: ThemeMode,
+    pub colors: ColorScheme,
 }
 
 impl iced::widget::scrollable::StyleSheet for ScrollableStyle {
     type Style = iced::Theme;
 
     fn active(&self, _style: &Self::Style) -> iced::widget::scrollable::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::scrollable::Appearance {
             container: iced::widget::container::Appearance::default(),
             scrollbar: iced::widget::scrollable::Scrollbar {
                 background: Some(iced::Background::Color(Color::TRANSPARENT)),
                 border: iced::Border::default(),
                 scroller: iced::widget::scrollable::Scroller {
-                    color: colors.bg_tertiary,
+                    color: self.colors.bg_tertiary,
                     border: iced::Border {
                         color: Color::TRANSPARENT,
                         width: 0.0,
@@ -709,14 +684,13 @@ impl iced::widget::scrollable::StyleSheet for ScrollableStyle {
         _style: &Self::Style,
         _is_mouse_over_scrollbar: bool,
     ) -> iced::widget::scrollable::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::scrollable::Appearance {
             container: iced::widget::container::Appearance::default(),
             scrollbar: iced::widget::scrollable::Scrollbar {
                 background: Some(iced::Background::Color(Color::TRANSPARENT)),
                 border: iced::Border::default(),
                 scroller: iced::widget::scrollable::Scroller {
-                    color: colors.border,
+                    color: self.colors.border,
                     border: iced::Border {
                         color: Color::TRANSPARENT,
                         width: 0.0,
@@ -732,19 +706,18 @@ impl iced::widget::scrollable::StyleSheet for ScrollableStyle {
 // ============== Toggle/Checkbox Style ==============
 
 pub struct ToggleStyle {
-    pub mode: ThemeMode,
+    pub colors: ColorScheme,
 }
 
 impl iced::widget::checkbox::StyleSheet for ToggleStyle {
     type Style = iced::Theme;
 
     fn active(&self, _style: &Self::Style, is_checked: bool) -> iced::widget::checkbox::Appearance {
-        let colors = get_colors(self.mode);
         iced::widget::checkbox::Appearance {
             background: if is_checked {
-                iced::Background::Color(colors.accent_primary)
+                iced::Background::Color(self.colors.accent_primary)
             } else {
-                iced::Background::Color(colors.bg_tertiary)
+                iced::Background::Color(self.colors.bg_tertiary)
             },
             icon_color: if is_checked {
                 Color::from_rgb(0.1, 0.1, 0.1)
@@ -756,7 +729,7 @@ impl iced::widget::checkbox::StyleSheet for ToggleStyle {
                 width: 0.0,
                 radius: 12.0.into(),
             },
-            text_color: Some(colors.text_primary),
+            text_color: Some(self.colors.text_primary),
         }
     }
 
@@ -766,11 +739,10 @@ impl iced::widget::checkbox::StyleSheet for ToggleStyle {
         is_checked: bool,
     ) -> iced::widget::checkbox::Appearance {
         let mut appearance = self.active(style, is_checked);
-        let colors = get_colors(self.mode);
         if is_checked {
-            appearance.background = iced::Background::Color(colors.accent_hover);
+            appearance.background = iced::Background::Color(self.colors.accent_hover);
         } else {
-            appearance.background = iced::Background::Color(colors.bg_hover);
+            appearance.background = iced::Background::Color(self.colors.bg_hover);
         }
         appearance
     }

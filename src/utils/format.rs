@@ -46,3 +46,17 @@ pub fn truncate_url(url: &str, max_len: usize) -> String {
         format!("{}...{}", &url[..half], &url[url.len() - half..])
     }
 }
+
+pub fn truncate_filename(name: &str, max_len: usize) -> String {
+    if name.len() <= max_len {
+        return name.to_string();
+    }
+    if let Some(dot_pos) = name.rfind('.') {
+        let ext = &name[dot_pos..];
+        let stem_budget = max_len.saturating_sub(ext.len() + 1);
+        if stem_budget > 0 {
+            return format!("{}…{}", &name[..stem_budget], ext);
+        }
+    }
+    format!("{}…", &name[..max_len.saturating_sub(1)])
+}

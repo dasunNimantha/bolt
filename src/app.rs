@@ -20,6 +20,7 @@ pub struct BoltApp {
     total_speed: f64,
     counts: (usize, usize, usize, usize, usize),
     error_message: Option<String>,
+    adding: bool,
 }
 
 impl Application for BoltApp {
@@ -43,6 +44,7 @@ impl Application for BoltApp {
             total_speed: 0.0,
             counts: (0, 0, 0, 0, 0),
             error_message: None,
+            adding: false,
         };
 
         (app, Command::none())
@@ -83,6 +85,7 @@ impl Application for BoltApp {
                 }
 
                 self.url_input.clear();
+                self.adding = true;
 
                 let engine = self.engine.clone();
                 let save_dir = self.settings.download_dir.clone();
@@ -99,12 +102,14 @@ impl Application for BoltApp {
             }
 
             Message::DownloadAdded(_item) => {
+                self.adding = false;
                 self.error_message = None;
                 self.refresh_snapshots();
                 Command::none()
             }
 
             Message::DownloadError(err) => {
+                self.adding = false;
                 eprintln!("Download error: {}", err);
                 self.error_message = Some(err);
                 Command::none()
@@ -117,7 +122,7 @@ impl Application for BoltApp {
                         if let Err(e) = engine.start_download(id).await {
                             return Message::DownloadError(e.to_string());
                         }
-                        Message::Noop
+                        Message::Tick
                     },
                     |msg| msg,
                 )
@@ -134,7 +139,7 @@ impl Application for BoltApp {
                 Command::perform(
                     async move {
                         let _ = engine.resume(id).await;
-                        Message::Noop
+                        Message::Tick
                     },
                     |msg| msg,
                 )
@@ -249,11 +254,16 @@ impl Application for BoltApp {
             self.counts,
             &self.settings.download_dir,
             self.error_message.as_deref(),
+            self.adding,
         )
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        iced::time::every(Duration::from_millis(250)).map(|_| Message::Tick)
+        if self.counts.1 > 0 {
+            iced::time::every(Duration::from_millis(250)).map(|_| Message::Tick)
+        } else {
+            Subscription::none()
+        }
     }
 
     fn theme(&self) -> Theme {
@@ -263,8 +273,9 @@ impl Application for BoltApp {
 
 impl BoltApp {
     fn refresh_snapshots(&mut self) {
-        self.downloads = self.engine.get_snapshots();
-        self.total_speed = self.engine.total_speed();
-        self.counts = self.engine.count_by_status();
+        let (snapshots, speed, counts) = self.engine.get_ui_state();
+        self.downloads = snapshots;
+        self.total_speed = speed;
+        self.counts = counts;
     }
 }

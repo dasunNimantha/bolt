@@ -1,13 +1,15 @@
 use crate::download::worker::download_segment;
 use crate::model::{DownloadItem, DownloadStatus, FileCategory, SegmentInfo, SpeedTracker};
 use anyhow::{anyhow, Result};
+use futures::FutureExt;
 use reqwest::header;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use uuid::Uuid;
 
-const MIN_SEGMENT_SIZE: u64 = 2 * 1024 * 1024; // 2 MB minimum per segment
+const MIN_SEGMENT_SIZE: u64 = 2 * 1024 * 1024;
 
 struct SegmentState {
     start: u64,
@@ -41,8 +43,13 @@ impl DownloadEngine {
     pub fn new() -> Self {
         let client = reqwest::Client::builder()
             .user_agent("Bolt/0.1.0")
+            .pool_max_idle_per_host(16)
+            .pool_idle_timeout(Duration::from_secs(90))
+            .tcp_nodelay(true)
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(3600))
             .build()
-            .unwrap_or_default();
+            .expect("Failed to build HTTP client");
 
         Self {
             state: Mutex::new(Vec::new()),
@@ -236,11 +243,7 @@ impl DownloadEngine {
             let seg_info: Vec<(u64, u64, Arc<AtomicU64>)> = dl
                 .segments
                 .iter()
-                .map(|s| {
-                    let downloaded = s.downloaded.load(Ordering::Relaxed);
-                    (s.start + downloaded, s.end, s.downloaded.clone())
-                })
-                .filter(|(start, end, _)| start < end)
+                .map(|s| (s.start, s.end, s.downloaded.clone()))
                 .collect();
 
             (
@@ -254,18 +257,16 @@ impl DownloadEngine {
 
         let mut new_handles = Vec::new();
         for (start, end, downloaded) in segments_info {
-            let already = downloaded.load(Ordering::Relaxed);
-            let actual_start = start.min(end);
-            if actual_start >= end {
+            let done = downloaded.load(Ordering::Relaxed);
+            if end != u64::MAX && start + done >= end {
                 continue;
             }
-            downloaded.store(actual_start - (start - already).min(actual_start), Ordering::Relaxed);
 
             let handle = tokio::spawn(download_segment(
                 self.client.clone(),
                 url.clone(),
                 save_path.clone(),
-                actual_start,
+                start,
                 end,
                 downloaded,
                 pause_flag.clone(),
@@ -337,19 +338,40 @@ impl DownloadEngine {
                 continue;
             }
 
-            let total_downloaded: u64 = dl
+            let raw_downloaded: u64 = dl
                 .segments
                 .iter()
                 .map(|s| s.downloaded.load(Ordering::Relaxed))
                 .sum();
 
-            dl.speed_tracker.record(total_downloaded);
+            let capped = match dl.total_size {
+                Some(total) => raw_downloaded.min(total),
+                None => raw_downloaded,
+            };
 
-            let finished_count = dl.task_handles.iter().filter(|h| h.is_finished()).count();
-            let total_tasks = dl.task_handles.len();
+            dl.speed_tracker.record(capped);
 
-            if finished_count == total_tasks {
-                let has_error = dl.total_size.is_some()
+            let all_finished = dl.task_handles.iter().all(|h| h.is_finished());
+
+            if all_finished && !dl.task_handles.is_empty() {
+                let mut any_task_error = false;
+
+                for handle in dl.task_handles.drain(..) {
+                    match handle.now_or_never() {
+                        Some(Ok(Ok(()))) => {}
+                        Some(Ok(Err(e))) => {
+                            any_task_error = true;
+                            dl.error = Some(e.to_string());
+                        }
+                        Some(Err(_join_err)) => {
+                            any_task_error = true;
+                            dl.error = Some("Worker task panicked".to_string());
+                        }
+                        None => {}
+                    }
+                }
+
+                let bytes_incomplete = dl.total_size.is_some()
                     && dl.segments.iter().any(|s| {
                         if s.end == u64::MAX {
                             return false;
@@ -358,9 +380,11 @@ impl DownloadEngine {
                         s.downloaded.load(Ordering::Relaxed) < expected
                     });
 
-                if has_error {
+                if any_task_error || bytes_incomplete {
                     dl.status = DownloadStatus::Failed;
-                    dl.error = Some("Download incomplete".to_string());
+                    if dl.error.is_none() {
+                        dl.error = Some("Download incomplete".to_string());
+                    }
                 } else {
                     dl.status = DownloadStatus::Completed;
                 }
@@ -368,76 +392,57 @@ impl DownloadEngine {
                 continue;
             }
 
-            if finished_count > 0 && dl.resumable {
-                rebalance_segments(dl, &self.client);
-            }
+            dl.task_handles.retain(|h| !h.is_finished());
         }
     }
 
-    pub fn get_snapshots(&self) -> Vec<DownloadItem> {
+    pub fn get_ui_state(
+        &self,
+    ) -> (
+        Vec<DownloadItem>,
+        f64,
+        (usize, usize, usize, usize, usize),
+    ) {
         let downloads = self.state.lock().unwrap();
-        downloads
-            .iter()
-            .map(|dl| {
-                let _total_downloaded: u64 = dl
-                    .segments
-                    .iter()
-                    .map(|s| s.downloaded.load(Ordering::Relaxed))
-                    .sum();
 
-                build_snapshot(
-                    dl.id,
-                    &dl.url,
-                    &dl.filename,
-                    &dl.save_path,
-                    dl.total_size,
-                    dl.status,
-                    &dl.segments,
-                    dl.speed_tracker.speed(),
-                    dl.category,
-                    dl.error.clone(),
-                    dl.resumable,
-                )
-            })
-            .collect()
-    }
+        let mut snapshots = Vec::with_capacity(downloads.len());
+        let mut total_speed = 0.0;
+        let mut active = 0usize;
+        let mut completed = 0usize;
+        let mut paused = 0usize;
+        let mut failed = 0usize;
 
-    pub fn total_speed(&self) -> f64 {
-        let downloads = self.state.lock().unwrap();
-        downloads
-            .iter()
-            .filter(|d| d.status == DownloadStatus::Downloading)
-            .map(|d| d.speed_tracker.speed())
-            .sum()
-    }
+        for dl in downloads.iter() {
+            let speed = dl.speed_tracker.speed();
 
-    pub fn has_active_downloads(&self) -> bool {
-        let downloads = self.state.lock().unwrap();
-        downloads.iter().any(|d| d.status.is_active())
-    }
+            if dl.status == DownloadStatus::Downloading {
+                total_speed += speed;
+            }
 
-    pub fn count_by_status(&self) -> (usize, usize, usize, usize, usize) {
-        let downloads = self.state.lock().unwrap();
+            match dl.status {
+                DownloadStatus::Queued | DownloadStatus::Connecting | DownloadStatus::Downloading => active += 1,
+                DownloadStatus::Completed => completed += 1,
+                DownloadStatus::Paused => paused += 1,
+                DownloadStatus::Failed | DownloadStatus::Cancelled => failed += 1,
+            }
+
+            snapshots.push(build_snapshot(
+                dl.id,
+                &dl.url,
+                &dl.filename,
+                &dl.save_path,
+                dl.total_size,
+                dl.status,
+                &dl.segments,
+                speed,
+                dl.category,
+                dl.error.clone(),
+                dl.resumable,
+            ));
+        }
+
         let total = downloads.len();
-        let active = downloads.iter().filter(|d| d.status.is_active()).count();
-        let completed = downloads
-            .iter()
-            .filter(|d| d.status == DownloadStatus::Completed)
-            .count();
-        let paused = downloads
-            .iter()
-            .filter(|d| d.status == DownloadStatus::Paused)
-            .count();
-        let failed = downloads
-            .iter()
-            .filter(|d| {
-                matches!(
-                    d.status,
-                    DownloadStatus::Failed | DownloadStatus::Cancelled
-                )
-            })
-            .count();
-        (total, active, completed, paused, failed)
+        (snapshots, total_speed, (total, active, completed, paused, failed))
     }
 }
 
@@ -466,77 +471,6 @@ fn calc_segment_count(total_size: Option<u64>, resumable: bool) -> usize {
     };
 
     target.min(by_size).max(1)
-}
-
-fn rebalance_segments(dl: &mut ManagedDownload, client: &reqwest::Client) {
-    dl.task_handles.retain(|h| !h.is_finished());
-
-    let mut remaining: Vec<(usize, u64)> = dl
-        .segments
-        .iter()
-        .enumerate()
-        .filter_map(|(i, s)| {
-            if s.end == u64::MAX {
-                return None;
-            }
-            let done = s.downloaded.load(Ordering::Relaxed);
-            let left = (s.end - s.start).saturating_sub(done);
-            if left > MIN_SEGMENT_SIZE * 2 {
-                Some((i, left))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    remaining.sort_by(|a, b| b.1.cmp(&a.1));
-
-    let idle_slots = dl
-        .segments
-        .len()
-        .saturating_sub(dl.task_handles.len())
-        .min(remaining.len());
-
-    if idle_slots == 0 {
-        return;
-    }
-
-    let mut new_segments = Vec::new();
-    let mut new_handles = Vec::new();
-
-    for &(seg_idx, _remaining_bytes) in remaining.iter().take(idle_slots) {
-        let seg = &dl.segments[seg_idx];
-        let done = seg.downloaded.load(Ordering::Relaxed);
-        let current_pos = seg.start + done;
-        let midpoint = current_pos + (seg.end - current_pos) / 2;
-
-        if midpoint >= seg.end || seg.end - midpoint < MIN_SEGMENT_SIZE {
-            continue;
-        }
-
-        let new_seg = SegmentState {
-            start: midpoint,
-            end: seg.end,
-            downloaded: Arc::new(AtomicU64::new(0)),
-        };
-
-        let handle = tokio::spawn(download_segment(
-            client.clone(),
-            dl.url.clone(),
-            dl.save_path.clone(),
-            midpoint,
-            seg.end,
-            new_seg.downloaded.clone(),
-            dl.pause_flag.clone(),
-            dl.cancel_flag.clone(),
-        ));
-
-        new_segments.push(new_seg);
-        new_handles.push(handle);
-    }
-
-    dl.segments.extend(new_segments);
-    dl.task_handles.extend(new_handles);
 }
 
 fn create_segments(total_size: Option<u64>, num_segments: usize) -> Vec<(u64, u64)> {
@@ -632,10 +566,15 @@ fn build_snapshot(
     error: Option<String>,
     resumable: bool,
 ) -> DownloadItem {
-    let total_downloaded: u64 = segments
+    let raw_downloaded: u64 = segments
         .iter()
         .map(|s| s.downloaded.load(Ordering::Relaxed))
         .sum();
+
+    let total_downloaded = match total_size {
+        Some(total) => raw_downloaded.min(total),
+        None => raw_downloaded,
+    };
 
     let segment_infos: Vec<SegmentInfo> = segments
         .iter()
