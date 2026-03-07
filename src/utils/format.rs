@@ -60,3 +60,106 @@ pub fn truncate_filename(name: &str, max_len: usize) -> String {
     }
     format!("{}…", &name[..max_len.saturating_sub(1)])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_bytes_zero() {
+        assert_eq!(format_bytes(0), "0 B");
+    }
+
+    #[test]
+    fn format_bytes_bytes() {
+        assert_eq!(format_bytes(512), "512 B");
+    }
+
+    #[test]
+    fn format_bytes_kilobytes() {
+        assert_eq!(format_bytes(1024), "1.0 KB");
+        assert_eq!(format_bytes(1536), "1.5 KB");
+    }
+
+    #[test]
+    fn format_bytes_megabytes() {
+        assert_eq!(format_bytes(1024 * 1024), "1.0 MB");
+        assert_eq!(format_bytes(10 * 1024 * 1024), "10.0 MB");
+    }
+
+    #[test]
+    fn format_bytes_gigabytes() {
+        assert_eq!(format_bytes(1024 * 1024 * 1024), "1.00 GB");
+    }
+
+    #[test]
+    fn format_bytes_terabytes() {
+        assert_eq!(format_bytes(1024 * 1024 * 1024 * 1024), "1.00 TB");
+    }
+
+    #[test]
+    fn format_speed_zero() {
+        assert_eq!(format_speed(0.0), "—");
+    }
+
+    #[test]
+    fn format_speed_negative() {
+        assert_eq!(format_speed(-100.0), "—");
+    }
+
+    #[test]
+    fn format_speed_normal() {
+        assert_eq!(format_speed(1024.0), "1.0 KB/s");
+        assert_eq!(format_speed(5.0 * 1024.0 * 1024.0), "5.0 MB/s");
+    }
+
+    #[test]
+    fn format_eta_seconds() {
+        assert_eq!(format_eta(45), "45s");
+    }
+
+    #[test]
+    fn format_eta_minutes() {
+        assert_eq!(format_eta(125), "2m 5s");
+    }
+
+    #[test]
+    fn format_eta_hours() {
+        assert_eq!(format_eta(3661), "1h 1m");
+    }
+
+    #[test]
+    fn truncate_url_short() {
+        let url = "https://example.com";
+        assert_eq!(truncate_url(url, 100), url);
+    }
+
+    #[test]
+    fn truncate_url_long() {
+        let url = "https://example.com/very/long/path/to/some/resource/file.zip";
+        let result = truncate_url(url, 30);
+        assert!(result.len() <= 30);
+        assert!(result.contains("..."));
+    }
+
+    #[test]
+    fn truncate_filename_short() {
+        assert_eq!(truncate_filename("short.txt", 20), "short.txt");
+    }
+
+    #[test]
+    fn truncate_filename_long_with_ext() {
+        let name = "a_very_long_filename_that_exceeds_the_limit.mp4";
+        let result = truncate_filename(name, 20);
+        assert!(result.chars().count() <= 20);
+        assert!(result.ends_with(".mp4"));
+        assert!(result.contains('…'));
+    }
+
+    #[test]
+    fn truncate_filename_no_extension() {
+        let name = "a_very_long_filename_without_any_extension_at_all";
+        let result = truncate_filename(name, 15);
+        assert!(result.contains('…'));
+    }
+}

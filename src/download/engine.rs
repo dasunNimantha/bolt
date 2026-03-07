@@ -609,3 +609,195 @@ fn build_snapshot(
         resumable,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- calc_segment_count ---
+
+    #[test]
+    fn segment_count_not_resumable() {
+        assert_eq!(calc_segment_count(Some(500 * 1024 * 1024), false), 1);
+    }
+
+    #[test]
+    fn segment_count_unknown_size() {
+        assert_eq!(calc_segment_count(None, true), 1);
+    }
+
+    #[test]
+    fn segment_count_tiny_file() {
+        assert_eq!(calc_segment_count(Some(1024), true), 1);
+    }
+
+    #[test]
+    fn segment_count_small_file() {
+        assert_eq!(calc_segment_count(Some(3 * 1024 * 1024), true), 1);
+    }
+
+    #[test]
+    fn segment_count_medium_file() {
+        assert_eq!(calc_segment_count(Some(25 * 1024 * 1024), true), 4);
+    }
+
+    #[test]
+    fn segment_count_large_file() {
+        assert_eq!(calc_segment_count(Some(100 * 1024 * 1024), true), 6);
+    }
+
+    #[test]
+    fn segment_count_very_large_file() {
+        assert_eq!(calc_segment_count(Some(500 * 1024 * 1024), true), 8);
+    }
+
+    // --- create_segments ---
+
+    #[test]
+    fn segments_unknown_size() {
+        let segs = create_segments(None, 4);
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0], (0, u64::MAX));
+    }
+
+    #[test]
+    fn segments_zero_size() {
+        let segs = create_segments(Some(0), 4);
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0], (0, u64::MAX));
+    }
+
+    #[test]
+    fn segments_single() {
+        let segs = create_segments(Some(1000), 1);
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0], (0, 1000));
+    }
+
+    #[test]
+    fn segments_multiple_cover_full_range() {
+        let total = 1024 * 1024;
+        let segs = create_segments(Some(total), 4);
+        assert_eq!(segs.len(), 4);
+        assert_eq!(segs[0].0, 0);
+        assert_eq!(segs.last().unwrap().1, total);
+
+        for i in 1..segs.len() {
+            assert_eq!(segs[i].0, segs[i - 1].1);
+        }
+    }
+
+    #[test]
+    fn segments_no_gaps_or_overlaps() {
+        let total = 10 * 1024 * 1024;
+        let segs = create_segments(Some(total), 8);
+
+        let mut covered = 0u64;
+        for (start, end) in &segs {
+            assert_eq!(*start, covered);
+            assert!(*end > *start);
+            covered = *end;
+        }
+        assert_eq!(covered, total);
+    }
+
+    // --- parse_content_disposition ---
+
+    #[test]
+    fn content_disposition_simple_filename() {
+        let result = parse_content_disposition("attachment; filename=\"report.pdf\"");
+        assert_eq!(result, Some("report.pdf".to_string()));
+    }
+
+    #[test]
+    fn content_disposition_unquoted() {
+        let result = parse_content_disposition("attachment; filename=report.pdf");
+        assert_eq!(result, Some("report.pdf".to_string()));
+    }
+
+    #[test]
+    fn content_disposition_encoded() {
+        let result = parse_content_disposition("attachment; filename*=UTF-8''my%20file%20name.pdf");
+        assert_eq!(result, Some("my file name.pdf".to_string()));
+    }
+
+    #[test]
+    fn content_disposition_encoded_preferred() {
+        let result = parse_content_disposition(
+            "attachment; filename*=UTF-8''encoded%20name.pdf; filename=\"fallback.pdf\"",
+        );
+        assert_eq!(result, Some("encoded name.pdf".to_string()));
+    }
+
+    #[test]
+    fn content_disposition_no_filename() {
+        let result = parse_content_disposition("inline");
+        assert_eq!(result, None);
+    }
+
+    // --- urldecode ---
+
+    #[test]
+    fn urldecode_plain() {
+        assert_eq!(urldecode("hello"), "hello");
+    }
+
+    #[test]
+    fn urldecode_spaces() {
+        assert_eq!(urldecode("hello+world"), "hello world");
+    }
+
+    #[test]
+    fn urldecode_percent() {
+        assert_eq!(urldecode("hello%20world"), "hello world");
+    }
+
+    #[test]
+    fn urldecode_mixed() {
+        assert_eq!(urldecode("file%20name+here.zip"), "file name here.zip");
+    }
+
+    #[test]
+    fn urldecode_special_chars() {
+        assert_eq!(urldecode("%2Fpath%2Fto%2Ffile"), "/path/to/file");
+    }
+
+    // --- DownloadEngine ---
+
+    #[test]
+    fn engine_default() {
+        let engine = DownloadEngine::default();
+        let (snapshots, speed, counts) = engine.get_ui_state();
+        assert!(snapshots.is_empty());
+        assert!((speed - 0.0).abs() < 0.01);
+        assert_eq!(counts, (0, 0, 0, 0, 0));
+    }
+
+    #[test]
+    fn engine_clear_completed_empty() {
+        let engine = DownloadEngine::new();
+        engine.clear_completed();
+        let (snapshots, _, _) = engine.get_ui_state();
+        assert!(snapshots.is_empty());
+    }
+
+    #[test]
+    fn engine_remove_nonexistent() {
+        let engine = DownloadEngine::new();
+        engine.remove(Uuid::new_v4());
+        let (snapshots, _, _) = engine.get_ui_state();
+        assert!(snapshots.is_empty());
+    }
+
+    #[test]
+    fn engine_pause_nonexistent() {
+        let engine = DownloadEngine::new();
+        engine.pause(Uuid::new_v4());
+    }
+
+    #[test]
+    fn engine_cancel_nonexistent() {
+        let engine = DownloadEngine::new();
+        engine.cancel(Uuid::new_v4());
+    }
+}

@@ -203,3 +203,236 @@ impl SpeedTracker {
         self.samples.clear();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn download_status_labels() {
+        assert_eq!(DownloadStatus::Queued.label(), "Queued");
+        assert_eq!(DownloadStatus::Downloading.label(), "Downloading");
+        assert_eq!(DownloadStatus::Paused.label(), "Paused");
+        assert_eq!(DownloadStatus::Completed.label(), "Completed");
+        assert_eq!(DownloadStatus::Failed.label(), "Failed");
+        assert_eq!(DownloadStatus::Cancelled.label(), "Cancelled");
+        assert_eq!(DownloadStatus::Connecting.label(), "Connecting");
+    }
+
+    #[test]
+    fn download_status_is_active() {
+        assert!(DownloadStatus::Queued.is_active());
+        assert!(DownloadStatus::Connecting.is_active());
+        assert!(DownloadStatus::Downloading.is_active());
+        assert!(!DownloadStatus::Paused.is_active());
+        assert!(!DownloadStatus::Completed.is_active());
+        assert!(!DownloadStatus::Failed.is_active());
+        assert!(!DownloadStatus::Cancelled.is_active());
+    }
+
+    #[test]
+    fn file_category_detection() {
+        assert_eq!(
+            FileCategory::from_filename("movie.mp4"),
+            FileCategory::Video
+        );
+        assert_eq!(
+            FileCategory::from_filename("movie.MKV"),
+            FileCategory::Video
+        );
+        assert_eq!(FileCategory::from_filename("song.mp3"), FileCategory::Audio);
+        assert_eq!(
+            FileCategory::from_filename("song.flac"),
+            FileCategory::Audio
+        );
+        assert_eq!(
+            FileCategory::from_filename("doc.pdf"),
+            FileCategory::Document
+        );
+        assert_eq!(
+            FileCategory::from_filename("doc.xlsx"),
+            FileCategory::Document
+        );
+        assert_eq!(
+            FileCategory::from_filename("archive.zip"),
+            FileCategory::Archive
+        );
+        assert_eq!(
+            FileCategory::from_filename("archive.tar"),
+            FileCategory::Archive
+        );
+        assert_eq!(
+            FileCategory::from_filename("photo.jpg"),
+            FileCategory::Image
+        );
+        assert_eq!(
+            FileCategory::from_filename("photo.PNG"),
+            FileCategory::Image
+        );
+        assert_eq!(
+            FileCategory::from_filename("app.deb"),
+            FileCategory::Application
+        );
+        assert_eq!(
+            FileCategory::from_filename("app.exe"),
+            FileCategory::Application
+        );
+        assert_eq!(FileCategory::from_filename("readme"), FileCategory::Other);
+        assert_eq!(FileCategory::from_filename("data.xyz"), FileCategory::Other);
+    }
+
+    #[test]
+    fn file_category_labels() {
+        assert_eq!(FileCategory::Video.label(), "Video");
+        assert_eq!(FileCategory::Audio.label(), "Audio");
+        assert_eq!(FileCategory::Document.label(), "Document");
+        assert_eq!(FileCategory::Archive.label(), "Archive");
+        assert_eq!(FileCategory::Image.label(), "Image");
+        assert_eq!(FileCategory::Application.label(), "Application");
+        assert_eq!(FileCategory::Other.label(), "Other");
+    }
+
+    #[test]
+    fn download_filter_matches() {
+        assert!(DownloadFilter::All.matches(DownloadStatus::Downloading));
+        assert!(DownloadFilter::All.matches(DownloadStatus::Completed));
+        assert!(DownloadFilter::All.matches(DownloadStatus::Failed));
+
+        assert!(DownloadFilter::Active.matches(DownloadStatus::Downloading));
+        assert!(DownloadFilter::Active.matches(DownloadStatus::Queued));
+        assert!(!DownloadFilter::Active.matches(DownloadStatus::Paused));
+
+        assert!(DownloadFilter::Completed.matches(DownloadStatus::Completed));
+        assert!(!DownloadFilter::Completed.matches(DownloadStatus::Downloading));
+
+        assert!(DownloadFilter::Paused.matches(DownloadStatus::Paused));
+        assert!(!DownloadFilter::Paused.matches(DownloadStatus::Downloading));
+
+        assert!(DownloadFilter::Failed.matches(DownloadStatus::Failed));
+        assert!(DownloadFilter::Failed.matches(DownloadStatus::Cancelled));
+        assert!(!DownloadFilter::Failed.matches(DownloadStatus::Completed));
+    }
+
+    #[test]
+    fn progress_percent_with_size() {
+        let item = DownloadItem {
+            id: Uuid::new_v4(),
+            url: String::new(),
+            filename: String::new(),
+            save_path: PathBuf::new(),
+            total_size: Some(1000),
+            downloaded: 500,
+            status: DownloadStatus::Downloading,
+            segments: vec![],
+            speed: 0.0,
+            category: FileCategory::Other,
+            error: None,
+            resumable: false,
+        };
+        assert!((item.progress_percent() - 50.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn progress_percent_no_size() {
+        let item = DownloadItem {
+            id: Uuid::new_v4(),
+            url: String::new(),
+            filename: String::new(),
+            save_path: PathBuf::new(),
+            total_size: None,
+            downloaded: 500,
+            status: DownloadStatus::Downloading,
+            segments: vec![],
+            speed: 0.0,
+            category: FileCategory::Other,
+            error: None,
+            resumable: false,
+        };
+        assert!((item.progress_percent() - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn progress_percent_zero_size() {
+        let item = DownloadItem {
+            id: Uuid::new_v4(),
+            url: String::new(),
+            filename: String::new(),
+            save_path: PathBuf::new(),
+            total_size: Some(0),
+            downloaded: 0,
+            status: DownloadStatus::Downloading,
+            segments: vec![],
+            speed: 0.0,
+            category: FileCategory::Other,
+            error: None,
+            resumable: false,
+        };
+        assert!((item.progress_percent() - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn eta_with_speed() {
+        let item = DownloadItem {
+            id: Uuid::new_v4(),
+            url: String::new(),
+            filename: String::new(),
+            save_path: PathBuf::new(),
+            total_size: Some(10000),
+            downloaded: 5000,
+            status: DownloadStatus::Downloading,
+            segments: vec![],
+            speed: 1000.0,
+            category: FileCategory::Other,
+            error: None,
+            resumable: false,
+        };
+        assert_eq!(item.eta_seconds(), Some(5));
+    }
+
+    #[test]
+    fn eta_without_speed() {
+        let item = DownloadItem {
+            id: Uuid::new_v4(),
+            url: String::new(),
+            filename: String::new(),
+            save_path: PathBuf::new(),
+            total_size: Some(10000),
+            downloaded: 5000,
+            status: DownloadStatus::Downloading,
+            segments: vec![],
+            speed: 0.0,
+            category: FileCategory::Other,
+            error: None,
+            resumable: false,
+        };
+        assert_eq!(item.eta_seconds(), None);
+    }
+
+    #[test]
+    fn speed_tracker_empty() {
+        let tracker = SpeedTracker::new();
+        assert!((tracker.speed() - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn speed_tracker_single_sample() {
+        let mut tracker = SpeedTracker::new();
+        tracker.samples.push_back((Instant::now(), 100));
+        assert!((tracker.speed() - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn speed_tracker_reset() {
+        let mut tracker = SpeedTracker::new();
+        tracker.samples.push_back((Instant::now(), 100));
+        tracker.reset();
+        assert!(tracker.samples.is_empty());
+    }
+
+    #[test]
+    fn speed_tracker_default() {
+        let tracker = SpeedTracker::default();
+        assert!(tracker.samples.is_empty());
+        assert_eq!(tracker.max_samples, 8);
+    }
+}

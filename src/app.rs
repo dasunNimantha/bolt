@@ -205,8 +205,7 @@ impl Application for BoltApp {
 
             Message::OpenFile(id) => {
                 if let Some(dl) = self.downloads.iter().find(|d| d.id == id) {
-                    let path = dl.save_path.clone();
-                    let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+                    let _ = open_path(&dl.save_path);
                 }
                 Command::none()
             }
@@ -214,7 +213,7 @@ impl Application for BoltApp {
             Message::OpenFolder(id) => {
                 if let Some(dl) = self.downloads.iter().find(|d| d.id == id) {
                     if let Some(parent) = dl.save_path.parent() {
-                        let _ = std::process::Command::new("xdg-open").arg(parent).spawn();
+                        let _ = open_path(parent);
                     }
                 }
                 Command::none()
@@ -277,5 +276,27 @@ impl BoltApp {
         self.downloads = snapshots;
         self.total_speed = speed;
         self.counts = counts;
+    }
+}
+
+fn open_path(path: &std::path::Path) -> std::io::Result<std::process::Child> {
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open").arg(path).spawn()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(path).spawn()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer").arg(path).spawn()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "unsupported platform",
+        ))
     }
 }

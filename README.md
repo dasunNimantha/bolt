@@ -1,6 +1,6 @@
 # Bolt
 
-Fast multi-threaded download manager for Linux, inspired by IDM and JDownloader. Built with Rust and Iced.
+Fast multi-threaded download manager for Linux, Windows and macOS.Built with Rust.
 
 ## Features
 
@@ -13,14 +13,15 @@ Fast multi-threaded download manager for Linux, inspired by IDM and JDownloader.
 - **File type detection** -- automatic categorization (video, audio, document, archive, image, app)
 - **Dark / Light theme** -- toggle between themes with a single click
 - **Configurable download directory** -- pick any folder via native file dialog
+- **Cross-platform** -- runs on Linux, Windows and macOS
 
 ## Building
 
 ### Prerequisites
 
 - Rust 1.70+ (install via [rustup](https://rustup.rs))
-- Linux with Wayland or X11
-- System dependencies:
+
+**Linux** (Wayland or X11):
 
 ```bash
 # Debian/Ubuntu
@@ -33,6 +34,10 @@ sudo dnf install pkg-config openssl-devel fontconfig-devel
 sudo pacman -S pkg-config openssl fontconfig
 ```
 
+**Windows**: No extra system dependencies -- just Rust via `rustup`.
+
+**macOS**: No extra system dependencies -- just Rust via `rustup`.
+
 ### Build and run
 
 ```bash
@@ -41,7 +46,12 @@ cargo run
 
 # Release build (optimized)
 cargo build --release
+
+# Linux / macOS
 ./target/release/bolt
+
+# Windows
+.\target\release\bolt.exe
 ```
 
 ## Usage
