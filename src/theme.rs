@@ -733,11 +733,7 @@ impl iced::widget::checkbox::StyleSheet for ToggleStyle {
         }
     }
 
-    fn hovered(
-        &self,
-        style: &Self::Style,
-        is_checked: bool,
-    ) -> iced::widget::checkbox::Appearance {
+    fn hovered(&self, style: &Self::Style, is_checked: bool) -> iced::widget::checkbox::Appearance {
         let mut appearance = self.active(style, is_checked);
         if is_checked {
             appearance.background = iced::Background::Color(self.colors.accent_hover);

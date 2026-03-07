@@ -396,13 +396,7 @@ impl DownloadEngine {
         }
     }
 
-    pub fn get_ui_state(
-        &self,
-    ) -> (
-        Vec<DownloadItem>,
-        f64,
-        (usize, usize, usize, usize, usize),
-    ) {
+    pub fn get_ui_state(&self) -> (Vec<DownloadItem>, f64, (usize, usize, usize, usize, usize)) {
         let downloads = self.state.lock().unwrap();
 
         let mut snapshots = Vec::with_capacity(downloads.len());
@@ -420,7 +414,9 @@ impl DownloadEngine {
             }
 
             match dl.status {
-                DownloadStatus::Queued | DownloadStatus::Connecting | DownloadStatus::Downloading => active += 1,
+                DownloadStatus::Queued
+                | DownloadStatus::Connecting
+                | DownloadStatus::Downloading => active += 1,
                 DownloadStatus::Completed => completed += 1,
                 DownloadStatus::Paused => paused += 1,
                 DownloadStatus::Failed | DownloadStatus::Cancelled => failed += 1,
@@ -442,7 +438,11 @@ impl DownloadEngine {
         }
 
         let total = downloads.len();
-        (snapshots, total_speed, (total, active, completed, paused, failed))
+        (
+            snapshots,
+            total_speed,
+            (total, active, completed, paused, failed),
+        )
     }
 }
 

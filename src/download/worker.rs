@@ -82,10 +82,7 @@ async fn try_download_segment(
     let mut request = client.get(url);
 
     if end != u64::MAX {
-        request = request.header(
-            header::RANGE,
-            format!("bytes={}-{}", actual_start, end - 1),
-        );
+        request = request.header(header::RANGE, format!("bytes={}-{}", actual_start, end - 1));
     }
 
     let response = request.send().await?;

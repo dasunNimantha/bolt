@@ -45,11 +45,7 @@ pub enum FileCategory {
 
 impl FileCategory {
     pub fn from_filename(filename: &str) -> Self {
-        let ext = filename
-            .rsplit('.')
-            .next()
-            .unwrap_or("")
-            .to_lowercase();
+        let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
 
         match ext.as_str() {
             "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm" | "m4v" | "mpg" | "mpeg"
@@ -152,10 +148,7 @@ impl DownloadItem {
         if self.speed <= 0.0 {
             return None;
         }
-        let remaining = self
-            .total_size
-            .unwrap_or(0)
-            .saturating_sub(self.downloaded);
+        let remaining = self.total_size.unwrap_or(0).saturating_sub(self.downloaded);
         Some((remaining as f64 / self.speed) as u64)
     }
 }
