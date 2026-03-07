@@ -467,10 +467,12 @@ mod tests {
         // 23:00 should be within 22:00–06:00
         let _ = settings; // tested structurally below
 
-        let mut s = AppSettings::default();
-        s.schedule_enabled = true;
-        s.schedule_from = (0, 0);
-        s.schedule_to = (23, 59);
+        let s = AppSettings {
+            schedule_enabled: true,
+            schedule_from: (0, 0),
+            schedule_to: (23, 59),
+            ..AppSettings::default()
+        };
         assert!(s.is_within_schedule(), "0:00–23:59 covers all times");
     }
 }
