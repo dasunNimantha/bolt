@@ -436,6 +436,7 @@ dependencies = [
  "chrono",
  "directories",
  "futures",
+ "gtk",
  "iced",
  "iced_aw",
  "image",

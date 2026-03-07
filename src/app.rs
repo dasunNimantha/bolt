@@ -274,7 +274,7 @@ impl Application for BoltApp {
                     if let Some(action) = tray.poll() {
                         return match action {
                             crate::tray::TrayAction::Show => Command::batch([
-                                window::minimize(window::Id::MAIN, false),
+                                window::change_mode(window::Id::MAIN, window::Mode::Windowed),
                                 window::gain_focus(window::Id::MAIN),
                             ]),
                             crate::tray::TrayAction::Quit => {
@@ -385,7 +385,7 @@ impl Application for BoltApp {
                 let (_total, active, _completed, paused, _failed) = self.counts;
                 if active > 0 || paused > 0 {
                     self.save_downloads();
-                    window::minimize(window::Id::MAIN, true)
+                    window::change_mode(window::Id::MAIN, window::Mode::Hidden)
                 } else {
                     self.save_downloads();
                     window::close(window::Id::MAIN)
@@ -393,7 +393,7 @@ impl Application for BoltApp {
             }
 
             Message::TrayShow => Command::batch([
-                window::minimize(window::Id::MAIN, false),
+                window::change_mode(window::Id::MAIN, window::Mode::Windowed),
                 window::gain_focus(window::Id::MAIN),
             ]),
 
@@ -441,7 +441,7 @@ impl Application for BoltApp {
         let tick_sub = if has_active {
             iced::time::every(Duration::from_millis(250)).map(|_| Message::Tick)
         } else if has_scheduled || has_tray {
-            iced::time::every(Duration::from_millis(2000)).map(|_| Message::Tick)
+            iced::time::every(Duration::from_millis(500)).map(|_| Message::Tick)
         } else {
             Subscription::none()
         };

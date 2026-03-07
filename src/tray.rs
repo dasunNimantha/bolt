@@ -14,6 +14,11 @@ pub struct BoltTray {
 
 impl BoltTray {
     pub fn new() -> Option<Self> {
+        #[cfg(target_os = "linux")]
+        {
+            let _ = gtk::init();
+        }
+
         let icon = Icon::from_rgba(create_icon_rgba(), 32, 32).ok()?;
 
         let show_item = MenuItem::new("Show Bolt", true, None);
@@ -33,6 +38,17 @@ impl BoltTray {
             .build()
             .ok()?;
 
+        // Flush GTK events immediately so the icon renders on startup
+        #[cfg(target_os = "linux")]
+        {
+            for _ in 0..50 {
+                while gtk::events_pending() {
+                    gtk::main_iteration_do(false);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+
         Some(Self {
             _icon: tray,
             show_id,
@@ -40,7 +56,16 @@ impl BoltTray {
         })
     }
 
+    /// Process pending GTK events (required on Linux for the tray icon to
+    /// appear and respond to clicks) and check for menu actions.
     pub fn poll(&self) -> Option<TrayAction> {
+        #[cfg(target_os = "linux")]
+        {
+            while gtk::events_pending() {
+                gtk::main_iteration_do(false);
+            }
+        }
+
         if let Ok(event) = MenuEvent::receiver().try_recv() {
             if event.id == self.show_id {
                 return Some(TrayAction::Show);
@@ -73,14 +98,12 @@ fn create_icon_rgba() -> Vec<u8> {
             let idx = (y * size + x) as usize * 4;
 
             if dist <= r_outer {
-                // Gold circle background
                 data[idx] = 0xE6;
                 data[idx + 1] = 0xA8;
                 data[idx + 2] = 0x17;
                 data[idx + 3] = 0xFF;
             }
 
-            // Lightning bolt shape (dark on gold)
             if dist <= r_inner {
                 let bx = x as i32;
                 let by = y as i32;
