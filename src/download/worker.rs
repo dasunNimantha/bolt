@@ -1,6 +1,7 @@
 use anyhow::Result;
 use futures::StreamExt;
 use reqwest::header;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -21,6 +22,7 @@ pub async fn download_segment(
     pause_flag: Arc<AtomicBool>,
     cancel_flag: Arc<AtomicBool>,
     per_segment_limit: u64,
+    extra_headers: HashMap<String, String>,
 ) -> Result<()> {
     for attempt in 0..=MAX_RETRIES {
         if cancel_flag.load(Ordering::Relaxed) {
@@ -37,6 +39,7 @@ pub async fn download_segment(
             &pause_flag,
             &cancel_flag,
             per_segment_limit,
+            &extra_headers,
         )
         .await
         {
@@ -76,6 +79,7 @@ async fn try_download_segment(
     pause_flag: &Arc<AtomicBool>,
     cancel_flag: &Arc<AtomicBool>,
     per_segment_limit: u64,
+    extra_headers: &HashMap<String, String>,
 ) -> Result<()> {
     let already_downloaded = downloaded.load(Ordering::Relaxed);
     let actual_start = start + already_downloaded;
@@ -85,6 +89,10 @@ async fn try_download_segment(
     }
 
     let mut request = client.get(url);
+
+    for (key, value) in extra_headers {
+        request = request.header(key.as_str(), value.as_str());
+    }
 
     if end != u64::MAX {
         request = request.header(header::RANGE, format!("bytes={}-{}", actual_start, end - 1));

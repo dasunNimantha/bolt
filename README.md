@@ -13,18 +13,43 @@ Fast multi-threaded download manager for Linux, Windows and macOS. Built with Ru
 - **Search & history** -- filter downloads by name or URL; completed downloads are tracked in persistent history
 - **Batch downloads** -- paste multiple URLs or import from a text file to queue downloads in bulk
 - **Smart queue management** -- auto-start queued downloads when slots open, auto-retry failed segments
-- **Dark / Light theme** -- toggle between themes in a grouped, card-based settings page
-- **Cross-platform** -- runs on Linux, Windows and macOS with native file dialogs and file-type detection
+- **Browser integration** -- Chrome extension intercepts downloads and sends them to Bolt with a confirmation popup
+- **Dark / Light / System theme** -- choose between dark, light, or auto-follow OS theme
+- **Multi-window popups** -- browser-intercepted downloads open in their own always-on-top dialog window
+- **Cross-platform** -- runs on Linux (Wayland + X11), Windows and macOS with native file dialogs
 
 ### Coming soon
 
 - **Proxy support** -- HTTP, HTTPS and SOCKS5 proxy with authentication and connection testing (implemented, UI hidden pending stabilization)
 
+## Browser Integration
+
+Bolt can intercept downloads from Chrome/Chromium browsers. Three components work together:
+
+1. **Chrome extension** (`extension/`) -- intercepts `chrome.downloads.onCreated`, cancels the browser download, captures cookies and referrer, and sends the request to the native messaging host
+2. **Native messaging host** (`bolt-nmh`) -- a small Rust binary that bridges Chrome's native messaging protocol (stdin/stdout with 4-byte length-prefixed JSON) to Bolt's TCP IPC server
+3. **IPC server** (inside Bolt) -- listens on `localhost:9817` for JSON download requests; each incoming download opens its own popup window for confirmation
+
+### Setup
+
+```bash
+# Build the native messaging host
+cargo build --release -p bolt-nmh
+
+# Install the native messaging host manifest (Linux)
+cd bolt-nmh && ./install.sh
+
+# Load the extension in Chrome
+# 1. Open chrome://extensions
+# 2. Enable Developer Mode
+# 3. Click "Load unpacked" and select the extension/ directory
+```
+
 ## Building
 
 ### Prerequisites
 
-- Rust 1.70+ (install via [rustup](https://rustup.rs))
+- Rust 1.88+ (install via [rustup](https://rustup.rs))
 
 **Linux** (Wayland or X11):
 
@@ -52,7 +77,7 @@ sudo pacman -S pkg-config openssl fontconfig gtk3 libayatana-appindicator libxdo
 cargo run
 
 # Release build (optimized)
-cargo build --release
+cargo build --workspace --release
 
 # Linux / macOS
 ./target/release/bolt
@@ -76,14 +101,15 @@ cargo build --release
 
 ```
 src/
-├── main.rs              # Entry point, iced app config
+├── main.rs              # Entry point, iced daemon config
 ├── app.rs               # Application state and message handling
 ├── message.rs           # Message enum (Elm architecture)
-├── model.rs             # Data structures (DownloadItem, SpeedTracker, etc.)
+├── model.rs             # Data structures (DownloadItem, PendingDownload, etc.)
 ├── settings.rs          # Persistent settings and download database (JSON)
-├── theme.rs             # Color scheme and widget styles
+├── theme.rs             # Color scheme and widget styles (closure-based)
 ├── tray.rs              # System tray icon, menu, and event polling
-├── view.rs              # UI layout and rendering
+├── ipc.rs               # TCP IPC server (localhost:9817) for browser integration
+├── view.rs              # UI layout and rendering (multi-window dispatch)
 ├── lib.rs               # Module declarations
 ├── download/
 │   ├── mod.rs           # Download module
@@ -92,14 +118,26 @@ src/
 └── utils/
     ├── mod.rs           # Utils module
     └── format.rs        # Byte/speed/ETA formatting
+
+bolt-nmh/                    # Native messaging host binary (workspace member)
+├── Cargo.toml
+├── com.bolt.nmh.json.template   # Chrome native messaging host manifest
+├── install.sh               # Linux install script
+└── src/main.rs              # Chrome native messaging ↔ Bolt IPC bridge
+
+extension/                   # Chrome extension (Manifest V3)
+├── manifest.json
+├── background.js            # Download interception, cookie capture, native messaging
+├── popup.html + popup.js    # Toggle on/off, connection status
+└── icons/                   # SVG icons
 ```
 
 ## Dependencies
 
 | Crate | Purpose |
 |-------|---------|
-| `iced` | GUI framework (Elm architecture) |
-| `iced_aw` | Additional widgets and icon fonts |
+| `iced` 0.14 | GUI framework (Elm architecture, multi-window daemon) |
+| `iced_fonts` 0.3 | Bootstrap icon font |
 | `tokio` | Async runtime |
 | `reqwest` | HTTP client with streaming |
 | `serde` / `serde_json` | Settings and download state serialization |

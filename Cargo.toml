@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "bolt-nmh"]
+
 [package]
 name = "bolt"
 version = "0.1.0"
@@ -7,9 +10,9 @@ authors = ["Dasun P"]
 license = "MIT"
 
 [dependencies]
-# GUI Framework (matching reel's design system)
-iced = { version = "0.12", features = ["svg", "tokio"] }
-iced_aw = { version = "0.9", default-features = false, features = ["icons"] }
+# GUI Framework
+iced = { version = "0.14", features = ["svg", "tokio", "wayland", "x11"] }
+iced_fonts = { version = "0.3", default-features = false, features = ["bootstrap"] }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -41,7 +44,7 @@ rfd = "0.14"
 url = "2"
 
 # Image for app icon
-image = { version = "0.24", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 # System tray
 tray-icon = "0.21"

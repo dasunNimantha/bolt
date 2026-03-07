@@ -1,27 +1,31 @@
 use crate::message::Message;
-use crate::model::{DownloadFilter, DownloadItem, DownloadStatus, FileCategory, ViewMode};
+use crate::model::{
+    DownloadFilter, DownloadItem, DownloadStatus, FileCategory, PendingDownload, ViewMode,
+};
 use crate::settings::{AppSettings, DownloadHistory, ProxyType};
 use crate::theme::{
-    get_colors, CardStyle, ColorScheme, DangerButtonStyle, DownloadCardStyle, FilterButtonStyle,
-    IconButtonStyle, PanelStyle, PrimaryButtonStyle, ProgressBarCompleteStyle,
-    ProgressBarErrorStyle, ProgressBarPausedStyle, ProgressBarStyle, ScrollableStyle,
-    SecondaryButtonStyle, StatusBadgeStyle, TextInputStyle, ThemeMode,
+    card_style, danger_button, download_card_style, filter_button, get_colors, icon_button,
+    panel_style, primary_button, progress_complete_style, progress_error_style,
+    progress_paused_style, progress_style, scrollable_style, secondary_button, status_badge_style,
+    text_input_style, transparent_button, ColorScheme, ThemeMode,
 };
-use crate::utils::format::{format_bytes, format_eta, format_speed, truncate_filename};
+use crate::utils::format::{
+    format_bytes, format_eta, format_speed, truncate_filename, truncate_url,
+};
 use iced::widget::{
     button, column, container, progress_bar, row, scrollable, text, text_input, Column, Row, Space,
 };
-use iced::{Alignment, Color, Element, Font, Length, Theme};
-use iced_aw::core::icons::bootstrap::{icon_to_text, Bootstrap};
+use iced::{window, Alignment, Background, Border, Color, Element, Font, Length, Theme};
+use iced_fonts::bootstrap as bs;
 
 const JETBRAINS_MONO: Font = Font::with_name("JetBrains Mono");
 
-fn icon(bootstrap: Bootstrap) -> iced::widget::Text<'static> {
-    icon_to_text(bootstrap).size(16.0)
+fn icon(f: fn() -> iced::widget::Text<'static>) -> iced::widget::Text<'static> {
+    f().size(16.0)
 }
 
-fn icon_sized(bootstrap: Bootstrap, size: f32) -> iced::widget::Text<'static> {
-    icon_to_text(bootstrap).size(size)
+fn icon_sized(f: fn() -> iced::widget::Text<'static>, size: f32) -> iced::widget::Text<'static> {
+    f().size(size)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -100,23 +104,20 @@ pub fn build_view<'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .push(header)
-        .push(Space::with_height(10))
+        .push(Space::new().height(10))
         .push(body);
-
-    let content: Element<'a, Message> = content.into();
 
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
         .padding([12, 16])
-        .style(iced::theme::Container::Custom(Box::new(
-            move |_: &Theme| iced::widget::container::Appearance {
-                text_color: Some(colors.text_primary),
-                background: Some(iced::Background::Color(colors.bg_primary)),
-                border: iced::Border::default(),
-                shadow: Default::default(),
-            },
-        )))
+        .style(move |_theme: &Theme| container::Style {
+            text_color: Some(colors.text_primary),
+            background: Some(Background::Color(colors.bg_primary)),
+            border: Border::default(),
+            shadow: Default::default(),
+            ..Default::default()
+        })
         .into()
 }
 
@@ -126,48 +127,184 @@ fn build_header(
     view_mode: ViewMode,
 ) -> Element<'static, Message> {
     let nav_button = match view_mode {
-        ViewMode::Downloads => button(icon(Bootstrap::GearFill))
+        ViewMode::Downloads => button(icon(bs::gear_fill))
             .on_press(Message::ShowSettings)
             .padding([6, 8])
-            .style(iced::theme::Button::Custom(Box::new(IconButtonStyle {
-                colors,
-            }))),
+            .style(icon_button(colors)),
         ViewMode::Settings => button(
             row![
-                icon(Bootstrap::ArrowLeft),
-                Space::with_width(6),
+                icon(bs::arrow_left),
+                Space::new().width(6),
                 text("Back").size(13),
             ]
-            .align_items(Alignment::Center),
+            .align_y(Alignment::Center),
         )
         .on_press(Message::ShowDownloads)
         .padding([6, 12])
-        .style(iced::theme::Button::Custom(Box::new(
-            SecondaryButtonStyle { colors },
-        ))),
+        .style(secondary_button(colors)),
     };
 
     container(
         row![
-            icon_sized(Bootstrap::LightningChargeFill, 24.0)
-                .style(iced::theme::Text::Color(colors.accent_primary)),
-            Space::with_width(10),
-            text("Bolt")
-                .size(22)
-                .style(iced::theme::Text::Color(colors.text_primary)),
-            Space::with_width(Length::Fill),
+            icon_sized(bs::lightning_charge_fill, 24.0).color(colors.accent_primary),
+            Space::new().width(10),
+            text("Bolt").size(22).color(colors.text_primary),
+            Space::new().width(Length::Fill),
             nav_button,
         ]
-        .align_items(Alignment::Center)
+        .align_y(Alignment::Center)
         .width(Length::Fill),
     )
     .width(Length::Fill)
     .padding([10, 16])
-    .style(iced::theme::Container::Custom(Box::new(CardStyle {
-        colors,
-        is_dark,
-    })))
+    .style(card_style(colors, is_dark))
     .into()
+}
+
+pub fn build_popup_window_view<'a>(
+    pending: &'a PendingDownload,
+    theme_mode: ThemeMode,
+    download_dir: &'a std::path::Path,
+    popup_id: window::Id,
+) -> Element<'a, Message> {
+    let colors = get_colors(theme_mode);
+
+    let filename = pending.display_filename();
+    let category = FileCategory::from_filename(&filename);
+
+    let category_icon: fn() -> iced::widget::Text<'static> = match category {
+        FileCategory::Video => bs::camera_video,
+        FileCategory::Audio => bs::music_note_beamed,
+        FileCategory::Document => bs::file_text,
+        FileCategory::Archive => bs::file_zip,
+        FileCategory::Image => bs::image,
+        FileCategory::Application => bs::terminal,
+        FileCategory::Other => bs::file_earmark,
+    };
+
+    let dir_display = download_dir.to_str().unwrap_or("Downloads").to_string();
+    let url_display = truncate_url(&pending.url, 60);
+
+    let title_row = row![
+        icon_sized(bs::download, 20.0).color(colors.accent_primary),
+        Space::new().width(10),
+        text("New Download").size(18).color(colors.text_primary),
+    ]
+    .align_y(Alignment::Center);
+
+    let divider = container(Space::new().height(0))
+        .width(Length::Fill)
+        .height(Length::Fixed(1.0))
+        .style(move |_theme: &Theme| container::Style {
+            text_color: None,
+            background: Some(Background::Color(colors.border_light)),
+            border: Border::default(),
+            shadow: Default::default(),
+            ..Default::default()
+        });
+
+    let file_row = row![
+        icon(category_icon).color(colors.accent_primary),
+        Space::new().width(10),
+        text(truncate_filename(&filename, 50))
+            .size(14)
+            .color(colors.text_primary),
+        Space::new().width(Length::Fill),
+        container(text(category.label()).size(10))
+            .padding([2, 8])
+            .style(status_badge_style(colors.accent_primary)),
+    ]
+    .align_y(Alignment::Center);
+
+    let url_row = row![
+        icon(bs::link).color(colors.text_disabled),
+        Space::new().width(10),
+        text(url_display).size(12).color(colors.text_secondary),
+    ]
+    .align_y(Alignment::Center);
+
+    let dir_row = row![
+        icon(bs::folder).color(colors.text_disabled),
+        Space::new().width(10),
+        text("Save to:").size(12).color(colors.text_secondary),
+        Space::new().width(6),
+        text(dir_display).size(12).color(colors.text_primary),
+    ]
+    .align_y(Alignment::Center);
+
+    let start_btn = button(
+        row![
+            icon(bs::play_fill).color(Color::from_rgb(0.1, 0.1, 0.1)),
+            Space::new().width(6),
+            text("Start Download").size(13),
+        ]
+        .align_y(Alignment::Center),
+    )
+    .on_press(Message::IpcAcceptStart(popup_id))
+    .padding([10, 20])
+    .style(primary_button(colors));
+
+    let queue_btn = button(
+        row![
+            icon(bs::plus).size(14),
+            Space::new().width(6),
+            text("Add to Queue").size(13),
+        ]
+        .align_y(Alignment::Center),
+    )
+    .on_press(Message::IpcAcceptQueue(popup_id))
+    .padding([10, 20])
+    .style(secondary_button(colors));
+
+    let cancel_btn = button(
+        row![
+            icon(bs::x_lg).size(12),
+            Space::new().width(6),
+            text("Cancel").size(13),
+        ]
+        .align_y(Alignment::Center),
+    )
+    .on_press(Message::IpcDismiss(popup_id))
+    .padding([10, 20])
+    .style(danger_button(colors));
+
+    let button_row = row![
+        start_btn,
+        Space::new().width(8),
+        queue_btn,
+        Space::new().width(Length::Fill),
+        cancel_btn,
+    ]
+    .align_y(Alignment::Center)
+    .width(Length::Fill);
+
+    let content = column![
+        title_row,
+        Space::new().height(12),
+        divider,
+        Space::new().height(16),
+        file_row,
+        Space::new().height(10),
+        url_row,
+        Space::new().height(10),
+        dir_row,
+        Space::new().height(24),
+        button_row,
+    ]
+    .width(Length::Fill);
+
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding([24, 28])
+        .style(move |_theme: &Theme| container::Style {
+            text_color: Some(colors.text_primary),
+            background: Some(Background::Color(colors.bg_primary)),
+            border: Border::default(),
+            shadow: Default::default(),
+            ..Default::default()
+        })
+        .into()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -216,31 +353,27 @@ fn build_downloads_view<'a>(
         content = content.push(
             container(
                 row![
-                    icon(Bootstrap::HourglassSplit)
-                        .style(iced::theme::Text::Color(colors.accent_primary)),
-                    Space::with_width(10),
+                    icon(bs::hourglass_split).color(colors.accent_primary),
+                    Space::new().width(10),
                     text("Fetching file info...")
                         .size(13)
-                        .style(iced::theme::Text::Color(colors.accent_primary)),
+                        .color(colors.accent_primary),
                 ]
-                .align_items(Alignment::Center),
+                .align_y(Alignment::Center),
             )
             .width(Length::Fill)
             .padding([10, 20])
-            .style(iced::theme::Container::Custom(Box::new(
-                move |_: &Theme| iced::widget::container::Appearance {
-                    text_color: None,
-                    background: Some(iced::Background::Color(Color::from_rgba(
-                        0.95, 0.75, 0.25, 0.08,
-                    ))),
-                    border: iced::Border {
-                        color: colors.accent_primary,
-                        width: 1.0,
-                        radius: 6.0.into(),
-                    },
-                    shadow: Default::default(),
+            .style(move |_theme: &Theme| container::Style {
+                text_color: None,
+                background: Some(Background::Color(Color::from_rgba(0.95, 0.75, 0.25, 0.08))),
+                border: Border {
+                    color: colors.accent_primary,
+                    width: 1.0,
+                    radius: 6.0.into(),
                 },
-            ))),
+                shadow: Default::default(),
+                ..Default::default()
+            }),
         );
     }
 
@@ -248,31 +381,25 @@ fn build_downloads_view<'a>(
         content = content.push(
             container(
                 row![
-                    icon(Bootstrap::ExclamationTriangleFill)
-                        .style(iced::theme::Text::Color(colors.error)),
-                    Space::with_width(8),
-                    text(err)
-                        .size(13)
-                        .style(iced::theme::Text::Color(colors.error)),
+                    icon(bs::exclamation_triangle_fill).color(colors.error),
+                    Space::new().width(8),
+                    text(err).size(13).color(colors.error),
                 ]
-                .align_items(Alignment::Center),
+                .align_y(Alignment::Center),
             )
             .width(Length::Fill)
             .padding([8, 20])
-            .style(iced::theme::Container::Custom(Box::new(
-                move |_: &Theme| iced::widget::container::Appearance {
-                    text_color: None,
-                    background: Some(iced::Background::Color(Color::from_rgba(
-                        0.95, 0.35, 0.35, 0.1,
-                    ))),
-                    border: iced::Border {
-                        color: colors.error,
-                        width: 1.0,
-                        radius: 6.0.into(),
-                    },
-                    shadow: Default::default(),
+            .style(move |_theme: &Theme| container::Style {
+                text_color: None,
+                background: Some(Background::Color(Color::from_rgba(0.95, 0.35, 0.35, 0.1))),
+                border: Border {
+                    color: colors.error,
+                    width: 1.0,
+                    radius: 6.0.into(),
                 },
-            ))),
+                shadow: Default::default(),
+                ..Default::default()
+            }),
         );
     }
 
@@ -280,32 +407,29 @@ fn build_downloads_view<'a>(
         content = content.push(
             container(
                 row![
-                    icon(Bootstrap::WifiOff).style(iced::theme::Text::Color(colors.warning)),
-                    Space::with_width(8),
+                    icon(bs::wifi_off).color(colors.warning),
+                    Space::new().width(8),
                     text(
                         "Network offline — downloads will auto-resume when connection is restored"
                     )
                     .size(12)
-                    .style(iced::theme::Text::Color(colors.warning)),
+                    .color(colors.warning),
                 ]
-                .align_items(Alignment::Center),
+                .align_y(Alignment::Center),
             )
             .width(Length::Fill)
             .padding([8, 20])
-            .style(iced::theme::Container::Custom(Box::new(
-                move |_: &Theme| iced::widget::container::Appearance {
-                    text_color: None,
-                    background: Some(iced::Background::Color(Color::from_rgba(
-                        0.95, 0.75, 0.25, 0.06,
-                    ))),
-                    border: iced::Border {
-                        color: colors.warning,
-                        width: 1.0,
-                        radius: 6.0.into(),
-                    },
-                    shadow: Default::default(),
+            .style(move |_theme: &Theme| container::Style {
+                text_color: None,
+                background: Some(Background::Color(Color::from_rgba(0.95, 0.75, 0.25, 0.06))),
+                border: Border {
+                    color: colors.warning,
+                    width: 1.0,
+                    radius: 6.0.into(),
                 },
-            ))),
+                shadow: Default::default(),
+                ..Default::default()
+            }),
         );
     }
 
@@ -314,7 +438,7 @@ fn build_downloads_view<'a>(
     content = content
         .push(
             row![filter_bar, search_bar]
-                .align_items(Alignment::Center)
+                .align_y(Alignment::Center)
                 .spacing(8)
                 .width(Length::Fill),
         )
@@ -355,7 +479,7 @@ fn build_settings_view<'a>(
     let sections = Column::new()
         .spacing(20)
         .width(Length::Fill)
-        // ── General ──
+        // General
         .push(settings_group(
             colors,
             is_dark,
@@ -366,21 +490,19 @@ fn build_settings_view<'a>(
                     "Theme",
                     button(
                         row![
-                            icon(if is_dark {
-                                Bootstrap::MoonStarsFill
-                            } else {
-                                Bootstrap::SunFill
+                            icon(match settings.theme_mode {
+                                ThemeMode::Dark => bs::moon_stars_fill as fn() -> _,
+                                ThemeMode::Light => bs::sun_fill as fn() -> _,
+                                ThemeMode::System => bs::display as fn() -> _,
                             }),
-                            Space::with_width(6),
-                            text(if is_dark { "Dark" } else { "Light" }).size(13),
+                            Space::new().width(6),
+                            text(settings.theme_mode.label()).size(13),
                         ]
-                        .align_items(Alignment::Center),
+                        .align_y(Alignment::Center),
                     )
                     .on_press(Message::ToggleTheme)
                     .padding([6, 14])
-                    .style(iced::theme::Button::Custom(Box::new(
-                        SecondaryButtonStyle { colors },
-                    )))
+                    .style(secondary_button(colors))
                     .into(),
                     None,
                     true,
@@ -390,24 +512,22 @@ fn build_settings_view<'a>(
                     "Download directory",
                     button(
                         row![
-                            icon(Bootstrap::FolderSymlink).size(13),
-                            Space::with_width(6),
+                            icon(bs::folder_symlink).size(13),
+                            Space::new().width(6),
                             text("Change").size(13),
                         ]
-                        .align_items(Alignment::Center),
+                        .align_y(Alignment::Center),
                     )
                     .on_press(Message::ChooseDownloadDir)
                     .padding([6, 14])
-                    .style(iced::theme::Button::Custom(Box::new(
-                        SecondaryButtonStyle { colors },
-                    )))
+                    .style(secondary_button(colors))
                     .into(),
                     Some(dir_display.to_string()),
                     false,
                 ),
             ],
         ))
-        // ── Downloads ──
+        // Downloads
         .push(settings_group(
             colors,
             is_dark,
@@ -422,15 +542,11 @@ fn build_settings_view<'a>(
                             .padding([6, 10])
                             .size(13)
                             .width(Length::Fixed(60.0))
-                            .style(iced::theme::TextInput::Custom(Box::new(TextInputStyle {
-                                colors,
-                            }))),
-                        Space::with_width(8),
-                        text("1 – 10")
-                            .size(11)
-                            .style(iced::theme::Text::Color(colors.text_disabled)),
+                            .style(text_input_style(colors)),
+                        Space::new().width(8),
+                        text("1 – 10").size(11).color(colors.text_disabled),
                     ]
-                    .align_items(Alignment::Center)
+                    .align_y(Alignment::Center)
                     .into(),
                     None,
                     true,
@@ -444,53 +560,41 @@ fn build_settings_view<'a>(
                             .padding([6, 10])
                             .size(13)
                             .width(Length::Fixed(100.0))
-                            .style(iced::theme::TextInput::Custom(Box::new(TextInputStyle {
-                                colors,
-                            }))),
-                        Space::with_width(6),
-                        text("KB/s")
-                            .size(12)
-                            .style(iced::theme::Text::Color(colors.text_disabled)),
-                        Space::with_width(8),
+                            .style(text_input_style(colors)),
+                        Space::new().width(6),
+                        text("KB/s").size(12).color(colors.text_disabled),
+                        Space::new().width(8),
                         if !speed_limit_input.is_empty() {
-                            button(icon(Bootstrap::XLg).size(11))
+                            button(icon(bs::x_lg).size(11))
                                 .on_press(Message::ClearSpeedLimit)
                                 .padding([4, 6])
-                                .style(iced::theme::Button::Custom(Box::new(IconButtonStyle {
-                                    colors,
-                                })))
+                                .style(icon_button(colors))
                         } else {
-                            button(text(""))
-                                .padding(0)
-                                .style(iced::theme::Button::Custom(Box::new(IconButtonStyle {
-                                    colors,
-                                })))
+                            button(text("")).padding(0).style(icon_button(colors))
                         },
                     ]
-                    .align_items(Alignment::Center)
+                    .align_y(Alignment::Center)
                     .into(),
                     Some(speed_status),
                     false,
                 ),
             ],
         ))
-        // ── Speed limit note ──
+        // Speed limit note
         .push(
             container(
                 row![
-                    icon(Bootstrap::InfoCircle)
-                        .size(12)
-                        .style(iced::theme::Text::Color(colors.text_disabled)),
-                    Space::with_width(8),
+                    icon(bs::info_circle).size(12).color(colors.text_disabled),
+                    Space::new().width(8),
                     text("Speed limit changes apply after pausing and resuming active downloads.")
                         .size(11)
-                        .style(iced::theme::Text::Color(colors.text_disabled)),
+                        .color(colors.text_disabled),
                 ]
-                .align_items(Alignment::Center),
+                .align_y(Alignment::Center),
             )
             .padding([0, 4]),
         )
-        // ── Schedule ──
+        // Schedule
         .push(settings_group(
             colors,
             is_dark,
@@ -513,9 +617,7 @@ fn build_settings_view<'a>(
                             .padding([6, 6])
                             .size(13)
                             .width(Length::Fixed(36.0))
-                            .style(iced::theme::TextInput::Custom(Box::new(TextInputStyle {
-                                colors,
-                            })));
+                            .style(text_input_style(colors));
                         if enabled {
                             inp = inp.on_input(on_input);
                         }
@@ -525,77 +627,52 @@ fn build_settings_view<'a>(
                         button(
                             row![
                                 icon(if enabled {
-                                    Bootstrap::ToggleOn
+                                    bs::toggle_on as fn() -> _
                                 } else {
-                                    Bootstrap::ToggleOff
+                                    bs::toggle_off as fn() -> _
                                 })
                                 .size(18),
-                                Space::with_width(6),
+                                Space::new().width(6),
                                 text(if enabled { "On" } else { "Off" }).size(13),
                             ]
-                            .align_items(Alignment::Center),
+                            .align_y(Alignment::Center),
                         )
                         .on_press(Message::ToggleSchedule)
                         .padding([6, 14])
-                        .style(iced::theme::Button::Custom(Box::new(
-                            SecondaryButtonStyle { colors },
-                        ))),
-                        Space::with_width(14),
+                        .style(secondary_button(colors)),
+                        Space::new().width(14),
                         time_input("22", sched_from_h, Message::SetScheduleFromH),
-                        text(" : ")
-                            .size(13)
-                            .style(iced::theme::Text::Color(colon_color)),
+                        text(" : ").size(13).color(colon_color),
                         time_input("00", sched_from_m, Message::SetScheduleFromM),
-                        Space::with_width(12),
-                        text("–")
-                            .size(16)
-                            .style(iced::theme::Text::Color(colors.text_primary)),
-                        Space::with_width(12),
+                        Space::new().width(12),
+                        text("–").size(16).color(colors.text_primary),
+                        Space::new().width(12),
                         time_input("06", sched_to_h, Message::SetScheduleToH),
-                        text(" : ")
-                            .size(13)
-                            .style(iced::theme::Text::Color(colon_color)),
+                        text(" : ").size(13).color(colon_color),
                         time_input("00", sched_to_m, Message::SetScheduleToM),
                     ]
-                    .align_items(Alignment::Center)
+                    .align_y(Alignment::Center)
                     .into()
                 },
                 None,
                 false,
             )],
         ))
-        // ── Network / Proxy (disabled — coming soon) ──
-        // .push(build_proxy_settings(
-        //     colors,
-        //     is_dark,
-        //     settings,
-        //     proxy_host,
-        //     proxy_port,
-        //     proxy_user,
-        //     proxy_pass,
-        //     proxy_testing,
-        //     proxy_test_result,
-        // ))
-        // ── About ──
+        // About
         .push(
             container(
                 row![
-                    icon_sized(Bootstrap::LightningChargeFill, 14.0)
-                        .style(iced::theme::Text::Color(colors.text_disabled)),
-                    Space::with_width(6),
-                    text("Bolt v0.1.0")
-                        .size(11)
-                        .style(iced::theme::Text::Color(colors.text_disabled)),
-                    Space::with_width(8),
-                    text("·")
-                        .size(11)
-                        .style(iced::theme::Text::Color(colors.text_disabled)),
-                    Space::with_width(8),
+                    icon_sized(bs::lightning_charge_fill, 14.0).color(colors.text_disabled),
+                    Space::new().width(6),
+                    text("Bolt v0.1.0").size(11).color(colors.text_disabled),
+                    Space::new().width(8),
+                    text("·").size(11).color(colors.text_disabled),
+                    Space::new().width(8),
                     text("Multi-threaded download manager")
                         .size(11)
-                        .style(iced::theme::Text::Color(colors.text_disabled)),
+                        .color(colors.text_disabled),
                 ]
-                .align_items(Alignment::Center),
+                .align_y(Alignment::Center),
             )
             .width(Length::Fill)
             .padding([8, 4]),
@@ -603,9 +680,7 @@ fn build_settings_view<'a>(
 
     scrollable(sections)
         .height(Length::Fill)
-        .style(iced::theme::Scrollable::Custom(Box::new(ScrollableStyle {
-            colors,
-        })))
+        .style(scrollable_style(colors))
         .into()
 }
 
@@ -625,23 +700,17 @@ fn build_proxy_settings<'a>(
     let has_proxy = active_type != ProxyType::None;
 
     let type_selector = {
-        let mut r = Row::new().spacing(4).align_items(Alignment::Center);
+        let mut r = Row::new().spacing(4).align_y(Alignment::Center);
         for pt in ProxyType::ALL {
             let is_selected = pt == active_type;
-            let btn = button(text(pt.label()).size(12).style(iced::theme::Text::Color(
-                if is_selected {
-                    Color::from_rgb(0.1, 0.1, 0.1)
-                } else {
-                    colors.text_secondary
-                },
-            )))
+            let btn = button(text(pt.label()).size(12).color(if is_selected {
+                Color::from_rgb(0.1, 0.1, 0.1)
+            } else {
+                colors.text_secondary
+            }))
             .on_press(Message::SetProxyType(pt))
             .padding([5, 12])
-            .style(if is_selected {
-                iced::theme::Button::Custom(Box::new(PrimaryButtonStyle { colors }))
-            } else {
-                iced::theme::Button::Custom(Box::new(SecondaryButtonStyle { colors }))
-            });
+            .style(filter_button(colors, is_selected));
             r = r.push(btn);
         }
         r
@@ -673,10 +742,6 @@ fn build_proxy_settings<'a>(
     )];
 
     if has_proxy {
-        let fs =
-            |c: ColorScheme| iced::theme::TextInput::Custom(Box::new(TextInputStyle { colors: c }));
-
-        // Host : Port
         rows.push(settings_row(
             colors,
             "Server",
@@ -686,26 +751,23 @@ fn build_proxy_settings<'a>(
                     .padding([6, 10])
                     .size(13)
                     .width(Length::Fixed(150.0))
-                    .style(fs(colors)),
-                Space::with_width(6),
-                text(":")
-                    .size(13)
-                    .style(iced::theme::Text::Color(colors.text_disabled)),
-                Space::with_width(6),
+                    .style(text_input_style(colors)),
+                Space::new().width(6),
+                text(":").size(13).color(colors.text_disabled),
+                Space::new().width(6),
                 text_input("Port", proxy_port)
                     .on_input(Message::SetProxyPort)
                     .padding([6, 10])
                     .size(13)
                     .width(Length::Fixed(70.0))
-                    .style(fs(colors)),
+                    .style(text_input_style(colors)),
             ]
-            .align_items(Alignment::Center)
+            .align_y(Alignment::Center)
             .into(),
             None,
             true,
         ));
 
-        // Username / Password
         rows.push(settings_row(
             colors,
             "Auth",
@@ -715,87 +777,78 @@ fn build_proxy_settings<'a>(
                     .padding([6, 10])
                     .size(13)
                     .width(Length::Fixed(120.0))
-                    .style(fs(colors)),
-                Space::with_width(8),
+                    .style(text_input_style(colors)),
+                Space::new().width(8),
                 text_input("Password", proxy_pass)
                     .on_input(Message::SetProxyPass)
                     .padding([6, 10])
                     .size(13)
                     .width(Length::Fixed(120.0))
-                    .style(fs(colors))
+                    .style(text_input_style(colors))
                     .secure(true),
             ]
-            .align_items(Alignment::Center)
+            .align_y(Alignment::Center)
             .into(),
             Some("Optional".to_string()),
             true,
         ));
 
-        // Test connection
         let test_btn: Element<'a, Message> = if proxy_testing {
             button(
                 row![
-                    icon(Bootstrap::ArrowRepeat).size(14),
-                    Space::with_width(5),
+                    icon(bs::arrow_repeat).size(14),
+                    Space::new().width(5),
                     text("Testing...").size(13),
                 ]
-                .align_items(Alignment::Center),
+                .align_y(Alignment::Center),
             )
             .padding([5, 12])
-            .style(iced::theme::Button::Custom(Box::new(
-                SecondaryButtonStyle { colors },
-            )))
+            .style(secondary_button(colors))
             .into()
         } else {
             button(
                 row![
-                    icon(Bootstrap::Wifi).size(14),
-                    Space::with_width(5),
+                    icon(bs::wifi).size(14),
+                    Space::new().width(5),
                     text("Test Connection").size(13),
                 ]
-                .align_items(Alignment::Center),
+                .align_y(Alignment::Center),
             )
             .on_press(Message::TestProxy)
             .padding([5, 12])
-            .style(iced::theme::Button::Custom(Box::new(
-                SecondaryButtonStyle { colors },
-            )))
+            .style(secondary_button(colors))
             .into()
         };
 
         let test_row: Element<'a, Message> = if let Some(result) = proxy_test_result {
             let (result_icon, result_color, result_text) = match result {
                 Ok(info) => (
-                    Bootstrap::CheckCircleFill,
+                    bs::check_circle_fill as fn() -> _,
                     Color::from_rgb(0.2, 0.78, 0.4),
                     format!("Connected — {}", info),
                 ),
                 Err(err) => {
                     let short = err.rsplit(": ").next().unwrap_or(err).to_string();
                     (
-                        Bootstrap::XCircleFill,
+                        bs::x_circle_fill as fn() -> _,
                         Color::from_rgb(0.9, 0.3, 0.3),
                         short,
                     )
                 }
             };
             row![
-                icon(result_icon)
-                    .size(13)
-                    .style(iced::theme::Text::Color(result_color)),
-                Space::with_width(5),
-                text(result_text)
-                    .size(12)
-                    .style(iced::theme::Text::Color(result_color)),
-                Space::with_width(Length::Fill),
+                icon(result_icon).size(13).color(result_color),
+                Space::new().width(5),
+                text(result_text).size(12).color(result_color),
+                Space::new().width(Length::Fill),
                 test_btn,
             ]
-            .align_items(Alignment::Center)
+            .align_y(Alignment::Center)
             .width(Length::Fill)
             .into()
         } else {
-            row![Space::with_width(Length::Fill), test_btn,]
-                .align_items(Alignment::Center)
+            row![Space::new().width(Length::Fill), test_btn,]
+                .align_y(Alignment::Center)
                 .width(Length::Fill)
                 .into()
         };
@@ -820,12 +873,12 @@ fn settings_group<'a>(
     let mut col = Column::new().spacing(0).width(Length::Fill);
 
     col = col.push(
-        container(
-            text(title)
-                .size(11)
-                .style(iced::theme::Text::Color(colors.text_disabled)),
-        )
-        .padding([0, 4, 6, 4]),
+        container(text(title).size(11).color(colors.text_disabled)).padding(iced::Padding {
+            top: 0.0,
+            right: 4.0,
+            bottom: 6.0,
+            left: 4.0,
+        }),
     );
 
     let mut card_col = Column::new().spacing(0).width(Length::Fill);
@@ -840,10 +893,7 @@ fn settings_group<'a>(
     col = col.push(
         container(card_col)
             .width(Length::Fill)
-            .style(iced::theme::Container::Custom(Box::new(CardStyle {
-                colors,
-                is_dark,
-            }))),
+            .style(card_style(colors, is_dark)),
     );
 
     col.into()
@@ -858,12 +908,8 @@ fn settings_row<'a>(
 ) -> Element<'a, Message> {
     let label_col: Element<'a, Message> = if let Some(desc) = description {
         column![
-            text(label)
-                .size(13)
-                .style(iced::theme::Text::Color(colors.text_primary)),
-            text(desc)
-                .size(11)
-                .style(iced::theme::Text::Color(colors.text_disabled)),
+            text(label).size(13).color(colors.text_primary),
+            text(desc).size(11).color(colors.text_disabled),
         ]
         .spacing(2)
         .width(Length::Fill)
@@ -872,13 +918,13 @@ fn settings_row<'a>(
         text(label)
             .size(13)
             .width(Length::Fill)
-            .style(iced::theme::Text::Color(colors.text_primary))
+            .color(colors.text_primary)
             .into()
     };
 
     container(
         row![label_col, control]
-            .align_items(Alignment::Center)
+            .align_y(Alignment::Center)
             .width(Length::Fill),
     )
     .width(Length::Fill)
@@ -887,18 +933,17 @@ fn settings_row<'a>(
 }
 
 fn settings_divider(colors: ColorScheme) -> Element<'static, Message> {
-    container(Space::with_height(0))
+    container(Space::new().height(0))
         .width(Length::Fill)
         .height(Length::Fixed(1.0))
         .padding([0, 12])
-        .style(iced::theme::Container::Custom(Box::new(
-            move |_: &Theme| iced::widget::container::Appearance {
-                text_color: None,
-                background: Some(iced::Background::Color(colors.border_light)),
-                border: iced::Border::default(),
-                shadow: Default::default(),
-            },
-        )))
+        .style(move |_theme: &Theme| container::Style {
+            text_color: None,
+            background: Some(Background::Color(colors.border_light)),
+            border: Border::default(),
+            shadow: Default::default(),
+            ..Default::default()
+        })
         .into()
 }
 
@@ -910,15 +955,13 @@ fn build_search_bar<'a>(search_query: &'a str, colors: ColorScheme) -> Element<'
             .size(12)
             .width(Length::Fixed(180.0))
             .icon(text_input::Icon {
-                font: iced_aw::BOOTSTRAP_FONT,
-                code_point: Bootstrap::Search.into(),
+                font: iced_fonts::BOOTSTRAP_FONT,
+                code_point: '\u{F52A}',
                 size: Some(iced::Pixels(12.0)),
                 spacing: 8.0,
                 side: text_input::Side::Left,
             })
-            .style(iced::theme::TextInput::Custom(Box::new(TextInputStyle {
-                colors,
-            }))),
+            .style(text_input_style(colors)),
     )
     .padding([4, 8])
     .into()
@@ -932,18 +975,14 @@ fn build_url_bar<'a>(url_input: &str, colors: ColorScheme, adding: bool) -> Elem
         text_input("Adding download...", url_input)
             .padding([10, 14])
             .size(14)
-            .style(iced::theme::TextInput::Custom(Box::new(TextInputStyle {
-                colors,
-            })))
+            .style(text_input_style(colors))
     } else {
         text_input("Paste URL(s) – one per line for batch", url_input)
             .on_input(Message::UrlInputChanged)
             .on_submit(Message::AddDownload)
             .padding([10, 14])
             .size(14)
-            .style(iced::theme::TextInput::Custom(Box::new(TextInputStyle {
-                colors,
-            })))
+            .style(text_input_style(colors))
     };
 
     let add_label = if adding {
@@ -957,83 +996,71 @@ fn build_url_bar<'a>(url_input: &str, colors: ColorScheme, adding: bool) -> Elem
     let add_button = if adding {
         button(
             row![
-                icon(Bootstrap::ArrowRepeat)
-                    .style(iced::theme::Text::Color(Color::from_rgb(0.1, 0.1, 0.1))),
-                Space::with_width(6),
+                icon(bs::arrow_repeat).color(Color::from_rgb(0.1, 0.1, 0.1)),
+                Space::new().width(6),
                 text(add_label).size(14),
             ]
-            .align_items(Alignment::Center),
+            .align_y(Alignment::Center),
         )
         .padding([10, 20])
-        .style(iced::theme::Button::Custom(Box::new(PrimaryButtonStyle {
-            colors,
-        })))
+        .style(primary_button(colors))
     } else if has_url {
         button(
             row![
-                icon(Bootstrap::Download)
-                    .style(iced::theme::Text::Color(Color::from_rgb(0.1, 0.1, 0.1))),
-                Space::with_width(6),
+                icon(bs::download).color(Color::from_rgb(0.1, 0.1, 0.1)),
+                Space::new().width(6),
                 text(add_label).size(14),
             ]
-            .align_items(Alignment::Center),
+            .align_y(Alignment::Center),
         )
         .on_press(Message::AddDownload)
         .padding([10, 20])
-        .style(iced::theme::Button::Custom(Box::new(PrimaryButtonStyle {
-            colors,
-        })))
+        .style(primary_button(colors))
     } else {
         button(
             row![
-                icon(Bootstrap::Download).style(iced::theme::Text::Color(colors.text_disabled)),
-                Space::with_width(6),
+                icon(bs::download).color(colors.text_disabled),
+                Space::new().width(6),
                 text(add_label).size(14),
             ]
-            .align_items(Alignment::Center),
+            .align_y(Alignment::Center),
         )
         .padding([10, 20])
-        .style(iced::theme::Button::Custom(Box::new(PrimaryButtonStyle {
-            colors,
-        })))
+        .style(primary_button(colors))
     };
 
     let import_button = button(
         row![
-            icon(Bootstrap::FileEarmarkArrowUp).size(14),
-            Space::with_width(4),
+            icon(bs::file_earmark_arrow_up).size(14),
+            Space::new().width(4),
             text("Import").size(13),
         ]
-        .align_items(Alignment::Center),
+        .align_y(Alignment::Center),
     )
     .on_press(Message::ImportFile)
     .padding([10, 14])
-    .style(iced::theme::Button::Custom(Box::new(
-        SecondaryButtonStyle { colors },
-    )));
+    .style(secondary_button(colors));
 
     container(
         row![
-            icon(Bootstrap::Link).style(iced::theme::Text::Color(if adding {
+            icon(bs::link).color(if adding {
                 colors.accent_primary
             } else {
                 colors.text_secondary
-            })),
-            Space::with_width(8),
+            }),
+            Space::new().width(8),
             input,
-            Space::with_width(10),
+            Space::new().width(10),
             add_button,
-            Space::with_width(6),
+            Space::new().width(6),
             import_button,
         ]
-        .align_items(Alignment::Center)
+        .align_y(Alignment::Center)
         .width(Length::Fill),
     )
     .width(Length::Fill)
     .padding([10, 16])
-    .style(iced::theme::Container::Custom(Box::new(PanelStyle {
-        colors,
-    })))
+    .style(panel_style(colors))
     .into()
 }
 
@@ -1052,7 +1079,7 @@ fn build_filter_bar(
         (DownloadFilter::Failed, format!("Failed ({})", failed)),
     ];
 
-    let mut filter_row = Row::new().spacing(6).align_items(Alignment::Center);
+    let mut filter_row = Row::new().spacing(6).align_y(Alignment::Center);
 
     for (filter, label) in filters {
         let is_active = active_filter == filter;
@@ -1060,30 +1087,25 @@ fn build_filter_bar(
             button(text(label).size(12))
                 .on_press(Message::FilterChanged(filter))
                 .padding([6, 14])
-                .style(iced::theme::Button::Custom(Box::new(FilterButtonStyle {
-                    colors,
-                    is_active,
-                }))),
+                .style(filter_button(colors, is_active)),
         );
     }
 
-    filter_row = filter_row.push(Space::with_width(Length::Fill));
+    filter_row = filter_row.push(Space::new().width(Length::Fill));
 
     if counts.2 > 0 {
         filter_row = filter_row.push(
             button(
                 row![
-                    icon(Bootstrap::Trash).size(12),
-                    Space::with_width(4),
+                    icon(bs::trash).size(12),
+                    Space::new().width(4),
                     text("Clear Done").size(12),
                 ]
-                .align_items(Alignment::Center),
+                .align_y(Alignment::Center),
             )
             .on_press(Message::ClearCompleted)
             .padding([6, 12])
-            .style(iced::theme::Button::Custom(Box::new(
-                SecondaryButtonStyle { colors },
-            ))),
+            .style(secondary_button(colors)),
         );
     }
 
@@ -1102,24 +1124,23 @@ fn build_download_list<'a>(
     if downloads.is_empty() {
         let empty = container(
             column![
-                icon_sized(Bootstrap::CloudArrowDown, 48.0)
-                    .style(iced::theme::Text::Color(colors.text_disabled)),
-                Space::with_height(16),
+                icon_sized(bs::cloud_arrow_down, 48.0).color(colors.text_disabled),
+                Space::new().height(16),
                 text("No downloads yet")
                     .size(16)
-                    .style(iced::theme::Text::Color(colors.text_secondary)),
-                Space::with_height(6),
+                    .color(colors.text_secondary),
+                Space::new().height(6),
                 text("Paste a URL above to start downloading")
                     .size(13)
-                    .style(iced::theme::Text::Color(colors.text_disabled)),
+                    .color(colors.text_disabled),
             ]
-            .align_items(Alignment::Center)
+            .align_x(Alignment::Center)
             .width(Length::Fill),
         )
         .width(Length::Fill)
         .height(Length::Fill)
-        .center_x()
-        .center_y()
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
         .padding(40);
 
         return empty.into();
@@ -1134,9 +1155,7 @@ fn build_download_list<'a>(
 
     scrollable(list)
         .height(Length::Fill)
-        .style(iced::theme::Scrollable::Custom(Box::new(ScrollableStyle {
-            colors,
-        })))
+        .style(scrollable_style(colors))
         .into()
 }
 
@@ -1148,14 +1167,14 @@ fn build_download_card<'a>(
 ) -> Element<'a, Message> {
     let id = download.id;
 
-    let category_icon = match download.category {
-        FileCategory::Video => Bootstrap::CameraVideo,
-        FileCategory::Audio => Bootstrap::MusicNoteBeamed,
-        FileCategory::Document => Bootstrap::FileText,
-        FileCategory::Archive => Bootstrap::FileZip,
-        FileCategory::Image => Bootstrap::Image,
-        FileCategory::Application => Bootstrap::Terminal,
-        FileCategory::Other => Bootstrap::FileEarmark,
+    let category_icon: fn() -> iced::widget::Text<'static> = match download.category {
+        FileCategory::Video => bs::camera_video,
+        FileCategory::Audio => bs::music_note_beamed,
+        FileCategory::Document => bs::file_text,
+        FileCategory::Archive => bs::file_zip,
+        FileCategory::Image => bs::image,
+        FileCategory::Application => bs::terminal,
+        FileCategory::Other => bs::file_earmark,
     };
 
     let status_color = match download.status {
@@ -1171,41 +1190,32 @@ fn build_download_card<'a>(
     let status_text = download.status.label().to_string();
 
     let name_and_status = row![
-        icon(category_icon).style(iced::theme::Text::Color(colors.accent_primary)),
-        Space::with_width(8),
-        column![text(display_name)
-            .size(13)
-            .style(iced::theme::Text::Color(colors.text_primary)),]
-        .width(Length::Fill),
-        Space::with_width(8),
-        container(text(status_text).size(10)).padding([2, 8]).style(
-            iced::theme::Container::Custom(Box::new(StatusBadgeStyle {
-                color: status_color,
-            }))
-        ),
-        Space::with_width(4),
+        icon(category_icon).color(colors.accent_primary),
+        Space::new().width(8),
+        column![text(display_name).size(13).color(colors.text_primary),].width(Length::Fill),
+        Space::new().width(8),
+        container(text(status_text).size(10))
+            .padding([2, 8])
+            .style(status_badge_style(status_color)),
+        Space::new().width(4),
         build_action_buttons(download, colors),
     ]
-    .align_items(Alignment::Center)
+    .align_y(Alignment::Center)
     .width(Length::Fill);
 
     let progress_percent = download.progress_percent();
 
-    let progress =
-        progress_bar(0.0..=100.0, progress_percent)
-            .height(4)
-            .style(match download.status {
-                DownloadStatus::Completed => {
-                    iced::theme::ProgressBar::Custom(Box::new(ProgressBarCompleteStyle { colors }))
-                }
-                DownloadStatus::Paused => {
-                    iced::theme::ProgressBar::Custom(Box::new(ProgressBarPausedStyle { colors }))
-                }
-                DownloadStatus::Failed | DownloadStatus::Cancelled => {
-                    iced::theme::ProgressBar::Custom(Box::new(ProgressBarErrorStyle { colors }))
-                }
-                _ => iced::theme::ProgressBar::Custom(Box::new(ProgressBarStyle { colors })),
-            });
+    let status = download.status;
+    let progress = progress_bar(0.0..=100.0, progress_percent)
+        .girth(4.0)
+        .style(move |theme| match status {
+            DownloadStatus::Completed => (progress_complete_style(colors))(theme),
+            DownloadStatus::Paused => (progress_paused_style(colors))(theme),
+            DownloadStatus::Failed | DownloadStatus::Cancelled => {
+                (progress_error_style(colors))(theme)
+            }
+            _ => (progress_style(colors))(theme),
+        });
 
     let size_text = match download.total_size {
         Some(total) => format!(
@@ -1216,13 +1226,13 @@ fn build_download_card<'a>(
         None => format_bytes(download.downloaded),
     };
 
-    let mut info = Row::new().spacing(12).align_items(Alignment::Center);
+    let mut info = Row::new().spacing(12).align_y(Alignment::Center);
 
     info = info.push(
-        text(&size_text)
+        text(size_text)
             .size(11)
             .font(JETBRAINS_MONO)
-            .style(iced::theme::Text::Color(colors.text_secondary)),
+            .color(colors.text_secondary),
     );
 
     if download.total_size.is_some() {
@@ -1230,25 +1240,25 @@ fn build_download_card<'a>(
             text(format!("{:.1}%", progress_percent))
                 .size(11)
                 .font(JETBRAINS_MONO)
-                .style(iced::theme::Text::Color(colors.accent_primary)),
+                .color(colors.accent_primary),
         );
     }
 
-    info = info.push(Space::with_width(Length::Fill));
+    info = info.push(Space::new().width(Length::Fill));
 
     if download.status == DownloadStatus::Downloading {
         info = info.push(
             text(format_speed(download.speed))
                 .size(11)
                 .font(JETBRAINS_MONO)
-                .style(iced::theme::Text::Color(colors.info)),
+                .color(colors.info),
         );
         if let Some(eta) = download.eta_seconds() {
             info = info.push(
                 text(format_eta(eta))
                     .size(11)
                     .font(JETBRAINS_MONO)
-                    .style(iced::theme::Text::Color(colors.text_disabled)),
+                    .color(colors.text_disabled),
             );
         }
     }
@@ -1264,7 +1274,7 @@ fn build_download_card<'a>(
         card_content = card_content.push(
             text(format!("Error: {}", error))
                 .size(11)
-                .style(iced::theme::Text::Color(colors.error)),
+                .color(colors.error),
         );
     }
 
@@ -1275,119 +1285,88 @@ fn build_download_card<'a>(
     )
     .on_press(Message::SelectDownload(Some(id)))
     .width(Length::Fill)
-    .style(iced::theme::Button::Custom(Box::new(
-        TransparentButtonStyle {
-            colors,
-            is_selected,
-        },
-    )));
+    .style(transparent_button(colors, is_selected));
 
     container(card)
         .width(Length::Fill)
-        .style(iced::theme::Container::Custom(Box::new(
-            DownloadCardStyle {
-                colors,
-                is_dark,
-                is_selected,
-            },
-        )))
+        .style(download_card_style(colors, is_dark, is_selected))
         .into()
 }
 
 fn build_action_buttons(download: &DownloadItem, colors: ColorScheme) -> Element<'_, Message> {
     let id = download.id;
 
-    let mut actions = Row::new().spacing(4).align_items(Alignment::Center);
+    let mut actions = Row::new().spacing(4).align_y(Alignment::Center);
 
     match download.status {
         DownloadStatus::Downloading | DownloadStatus::Connecting => {
             actions = actions.push(
-                button(icon(Bootstrap::PauseFill))
+                button(icon(bs::pause_fill))
                     .on_press(Message::PauseDownload(id))
                     .padding([6, 8])
-                    .style(iced::theme::Button::Custom(Box::new(IconButtonStyle {
-                        colors,
-                    }))),
+                    .style(icon_button(colors)),
             );
             actions = actions.push(
-                button(icon(Bootstrap::XLg))
+                button(icon(bs::x_lg))
                     .on_press(Message::CancelDownload(id))
                     .padding([6, 8])
-                    .style(iced::theme::Button::Custom(Box::new(DangerButtonStyle {
-                        colors,
-                    }))),
+                    .style(danger_button(colors)),
             );
         }
         DownloadStatus::Paused => {
             actions = actions.push(
-                button(icon(Bootstrap::PlayFill))
+                button(icon(bs::play_fill))
                     .on_press(Message::ResumeDownload(id))
                     .padding([6, 8])
-                    .style(iced::theme::Button::Custom(Box::new(IconButtonStyle {
-                        colors,
-                    }))),
+                    .style(icon_button(colors)),
             );
             actions = actions.push(
-                button(icon(Bootstrap::XLg))
+                button(icon(bs::x_lg))
                     .on_press(Message::CancelDownload(id))
                     .padding([6, 8])
-                    .style(iced::theme::Button::Custom(Box::new(DangerButtonStyle {
-                        colors,
-                    }))),
+                    .style(danger_button(colors)),
             );
         }
         DownloadStatus::Completed => {
             actions = actions.push(
-                button(icon(Bootstrap::FolderSymlink))
+                button(icon(bs::folder_symlink))
                     .on_press(Message::OpenFolder(id))
                     .padding([6, 8])
-                    .style(iced::theme::Button::Custom(Box::new(IconButtonStyle {
-                        colors,
-                    }))),
+                    .style(icon_button(colors)),
             );
             actions = actions.push(
-                button(icon(Bootstrap::Trash))
+                button(icon(bs::trash))
                     .on_press(Message::RemoveDownload(id))
                     .padding([6, 8])
-                    .style(iced::theme::Button::Custom(Box::new(DangerButtonStyle {
-                        colors,
-                    }))),
+                    .style(danger_button(colors)),
             );
         }
         DownloadStatus::Failed | DownloadStatus::Cancelled => {
             actions = actions.push(
-                button(icon(Bootstrap::ArrowRepeat))
+                button(icon(bs::arrow_repeat))
                     .on_press(Message::RetryDownload(id))
                     .padding([6, 8])
-                    .style(iced::theme::Button::Custom(Box::new(IconButtonStyle {
-                        colors,
-                    }))),
+                    .style(icon_button(colors)),
             );
             actions = actions.push(
-                button(icon(Bootstrap::Trash))
+                button(icon(bs::trash))
                     .on_press(Message::RemoveDownload(id))
                     .padding([6, 8])
-                    .style(iced::theme::Button::Custom(Box::new(DangerButtonStyle {
-                        colors,
-                    }))),
+                    .style(danger_button(colors)),
             );
         }
         DownloadStatus::Queued => {
             actions = actions.push(
-                button(icon(Bootstrap::PlayFill))
+                button(icon(bs::play_fill))
                     .on_press(Message::StartDownload(id))
                     .padding([6, 8])
-                    .style(iced::theme::Button::Custom(Box::new(IconButtonStyle {
-                        colors,
-                    }))),
+                    .style(icon_button(colors)),
             );
             actions = actions.push(
-                button(icon(Bootstrap::XLg))
+                button(icon(bs::x_lg))
                     .on_press(Message::RemoveDownload(id))
                     .padding([6, 8])
-                    .style(iced::theme::Button::Custom(Box::new(DangerButtonStyle {
-                        colors,
-                    }))),
+                    .style(danger_button(colors)),
             );
         }
     }
@@ -1404,15 +1383,16 @@ fn build_status_bar(
 ) -> Element<'static, Message> {
     let (total, active, completed, _paused, _failed) = counts;
 
-    let dir_display = download_dir
+    let dir_display: String = download_dir
         .file_name()
         .and_then(|n| n.to_str())
-        .unwrap_or("Downloads");
+        .unwrap_or("Downloads")
+        .to_string();
 
-    let net_icon = if network_online {
-        Bootstrap::Wifi
+    let net_icon: fn() -> iced::widget::Text<'static> = if network_online {
+        bs::wifi
     } else {
-        Bootstrap::WifiOff
+        bs::wifi_off
     };
     let net_color = if network_online {
         colors.success
@@ -1422,126 +1402,69 @@ fn build_status_bar(
 
     container(
         row![
-            icon(Bootstrap::Folder)
-                .size(12)
-                .style(iced::theme::Text::Color(colors.text_disabled)),
-            Space::with_width(4),
-            button(
-                text(dir_display)
-                    .size(11)
-                    .style(iced::theme::Text::Color(colors.text_secondary))
-            )
-            .on_press(Message::ChooseDownloadDir)
-            .padding([2, 6])
-            .style(iced::theme::Button::Custom(Box::new(IconButtonStyle {
-                colors,
-            }))),
-            Space::with_width(Length::Fill),
-            icon(net_icon)
-                .size(11)
-                .style(iced::theme::Text::Color(net_color)),
-            Space::with_width(12),
+            icon(bs::folder).size(12).color(colors.text_disabled),
+            Space::new().width(4),
+            button(text(dir_display).size(11).color(colors.text_secondary))
+                .on_press(Message::ChooseDownloadDir)
+                .padding([2, 6])
+                .style(icon_button(colors)),
+            Space::new().width(Length::Fill),
+            icon(net_icon).size(11).color(net_color),
+            Space::new().width(12),
             text(format!("{} downloads", total))
                 .size(12)
-                .style(iced::theme::Text::Color(colors.text_disabled)),
-            Space::with_width(16),
+                .color(colors.text_disabled),
+            Space::new().width(16),
             if active > 0 {
                 text(format!("{} active", active))
                     .size(12)
-                    .style(iced::theme::Text::Color(colors.info))
+                    .color(colors.info)
             } else {
                 text("").size(12)
             },
-            Space::with_width(16),
+            Space::new().width(16),
             if completed > 0 {
                 text(format!("{} done", completed))
                     .size(12)
-                    .style(iced::theme::Text::Color(colors.success))
+                    .color(colors.success)
             } else {
                 text("").size(12)
             },
-            Space::with_width(16),
+            Space::new().width(16),
             if active > 0 {
                 row![
-                    icon(Bootstrap::Speedometer)
-                        .size(12)
-                        .style(iced::theme::Text::Color(colors.accent_primary)),
-                    Space::with_width(4),
+                    icon(bs::speedometer).size(12).color(colors.accent_primary),
+                    Space::new().width(4),
                     text(format_speed(total_speed))
                         .size(12)
                         .font(JETBRAINS_MONO)
-                        .style(iced::theme::Text::Color(colors.accent_primary)),
+                        .color(colors.accent_primary),
                 ]
-                .align_items(Alignment::Center)
+                .align_y(Alignment::Center)
             } else {
                 row![]
             },
         ]
-        .align_items(Alignment::Center)
+        .align_y(Alignment::Center)
         .width(Length::Fill),
     )
     .width(Length::Fill)
     .padding([8, 16])
-    .style(iced::theme::Container::Custom(Box::new(
-        move |_: &Theme| iced::widget::container::Appearance {
-            text_color: Some(colors.text_secondary),
-            background: Some(iced::Background::Color(colors.surface)),
-            border: iced::Border {
-                color: colors.border_light,
-                width: 1.0,
-                radius: [0.0, 0.0, 8.0, 8.0].into(),
+    .style(move |_theme: &Theme| container::Style {
+        text_color: Some(colors.text_secondary),
+        background: Some(Background::Color(colors.surface)),
+        border: Border {
+            color: colors.border_light,
+            width: 1.0,
+            radius: iced::border::Radius {
+                top_left: 0.0,
+                top_right: 0.0,
+                bottom_right: 8.0,
+                bottom_left: 8.0,
             },
-            shadow: Default::default(),
         },
-    )))
+        shadow: Default::default(),
+        ..Default::default()
+    })
     .into()
-}
-
-struct TransparentButtonStyle {
-    colors: ColorScheme,
-    is_selected: bool,
-}
-
-impl iced::widget::button::StyleSheet for TransparentButtonStyle {
-    type Style = iced::Theme;
-
-    fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
-        iced::widget::button::Appearance {
-            background: Some(iced::Background::Color(Color::TRANSPARENT)),
-            border: iced::Border {
-                color: Color::TRANSPARENT,
-                width: 0.0,
-                radius: 10.0.into(),
-            },
-            text_color: self.colors.text_primary,
-            shadow: Default::default(),
-            shadow_offset: iced::Vector::new(0.0, 0.0),
-        }
-    }
-
-    fn hovered(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
-        iced::widget::button::Appearance {
-            background: Some(iced::Background::Color(if self.is_selected {
-                Color::TRANSPARENT
-            } else {
-                Color::from_rgba(0.5, 0.5, 0.5, 0.05)
-            })),
-            border: iced::Border {
-                color: Color::TRANSPARENT,
-                width: 0.0,
-                radius: 10.0.into(),
-            },
-            text_color: self.colors.text_primary,
-            shadow: Default::default(),
-            shadow_offset: iced::Vector::new(0.0, 0.0),
-        }
-    }
-
-    fn pressed(&self, style: &Self::Style) -> iced::widget::button::Appearance {
-        self.hovered(style)
-    }
-
-    fn disabled(&self, style: &Self::Style) -> iced::widget::button::Appearance {
-        self.active(style)
-    }
 }

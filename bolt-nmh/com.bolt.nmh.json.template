@@ -1,0 +1,9 @@
+{
+  "name": "com.bolt.nmh",
+  "description": "Bolt Download Manager Native Messaging Host",
+  "path": "BOLT_NMH_PATH",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://EXTENSION_ID/"
+  ]
+}

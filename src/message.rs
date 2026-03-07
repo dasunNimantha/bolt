@@ -63,8 +63,17 @@ pub enum Message {
     // Network / auto-resume
     NetworkStatus(bool),
 
+    // Browser integration popup (carries popup window id)
+    IpcAcceptStart(iced::window::Id),
+    IpcAcceptQueue(iced::window::Id),
+    IpcDismiss(iced::window::Id),
+
+    // System theme
+    SystemThemeChanged(bool),
+
     // Tray / window
-    WindowCloseRequested,
+    WindowOpened(iced::window::Id),
+    WindowCloseRequested(iced::window::Id),
     TrayShow,
     TrayQuit,
 

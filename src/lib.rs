@@ -1,5 +1,6 @@
 pub mod app;
 pub mod download;
+pub mod ipc;
 pub mod message;
 pub mod model;
 pub mod settings;

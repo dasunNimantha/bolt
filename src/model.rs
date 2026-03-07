@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::time::Instant;
 use uuid::Uuid;
@@ -146,6 +146,33 @@ pub struct PersistedDownload {
     pub category: FileCategory,
     pub error: Option<String>,
     pub resumable: bool,
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingDownload {
+    pub url: String,
+    pub filename: Option<String>,
+    pub headers: HashMap<String, String>,
+}
+
+impl PendingDownload {
+    pub fn display_filename(&self) -> String {
+        if let Some(ref name) = self.filename {
+            if !name.is_empty() {
+                return name.clone();
+            }
+        }
+        let path = self.url.rsplit('/').next().unwrap_or("download");
+        let path = path.split('?').next().unwrap_or(path);
+        let path = path.split('#').next().unwrap_or(path);
+        if path.is_empty() {
+            "download".to_string()
+        } else {
+            path.to_string()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -499,6 +526,7 @@ mod tests {
             category: FileCategory::Archive,
             error: None,
             resumable: true,
+            headers: HashMap::new(),
         };
 
         let json = serde_json::to_string(&pd).unwrap();

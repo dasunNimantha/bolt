@@ -7,6 +7,7 @@ use anyhow::{anyhow, Result};
 
 use futures::FutureExt;
 use reqwest::header;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -38,6 +39,7 @@ struct ManagedDownload {
     task_handles: Vec<tokio::task::JoinHandle<Result<()>>>,
     /// True when the user clicked Start but was blocked by concurrency limit.
     awaiting_slot: bool,
+    headers: HashMap<String, String>,
 }
 
 pub struct DownloadEngine {
@@ -141,6 +143,7 @@ impl DownloadEngine {
                 speed_tracker: SpeedTracker::new(),
                 task_handles: Vec::new(),
                 awaiting_slot: false,
+                headers: pd.headers.clone(),
             });
         }
     }
@@ -178,6 +181,7 @@ impl DownloadEngine {
                     category: dl.category,
                     error: dl.error.clone(),
                     resumable: dl.resumable,
+                    headers: dl.headers.clone(),
                 }
             })
             .collect();
@@ -205,10 +209,31 @@ impl DownloadEngine {
         url: String,
         save_dir: PathBuf,
     ) -> Result<DownloadItem> {
+        self.add_download_with_headers(url, save_dir, None).await
+    }
+
+    pub async fn add_download_with_headers(
+        self: &Arc<Self>,
+        url: String,
+        save_dir: PathBuf,
+        headers: Option<HashMap<String, String>>,
+    ) -> Result<DownloadItem> {
+        let hdrs = headers.unwrap_or_default();
         let client = self.client.lock().unwrap().clone();
-        let response = match client.head(&url).send().await {
+
+        let mut head_req = client.head(&url);
+        for (k, v) in &hdrs {
+            head_req = head_req.header(k.as_str(), v.as_str());
+        }
+        let response = match head_req.send().await {
             Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => resp,
-            _ => client.get(&url).send().await?,
+            _ => {
+                let mut get_req = client.get(&url);
+                for (k, v) in &hdrs {
+                    get_req = get_req.header(k.as_str(), v.as_str());
+                }
+                get_req.send().await?
+            }
         };
 
         if !response.status().is_success()
@@ -284,6 +309,7 @@ impl DownloadEngine {
             speed_tracker: SpeedTracker::new(),
             task_handles: Vec::new(),
             awaiting_slot: false,
+            headers: hdrs,
         };
 
         self.state.lock().unwrap().push(managed);
@@ -291,7 +317,16 @@ impl DownloadEngine {
     }
 
     pub async fn start_download(self: &Arc<Self>, id: Uuid) -> Result<()> {
-        let (url, save_path, total_size, segments_info, pause_flag, cancel_flag, num_segments) = {
+        let (
+            url,
+            save_path,
+            total_size,
+            segments_info,
+            pause_flag,
+            cancel_flag,
+            num_segments,
+            hdrs,
+        ) = {
             let mut downloads = self.state.lock().unwrap();
 
             let active = self.count_downloading(&downloads);
@@ -335,6 +370,7 @@ impl DownloadEngine {
                 dl.pause_flag.clone(),
                 dl.cancel_flag.clone(),
                 n,
+                dl.headers.clone(),
             )
         };
 
@@ -363,6 +399,7 @@ impl DownloadEngine {
                 pause_flag.clone(),
                 cancel_flag.clone(),
                 seg_limit,
+                hdrs.clone(),
             ));
             task_handles.push(handle);
         }
@@ -387,7 +424,7 @@ impl DownloadEngine {
     }
 
     pub async fn resume(self: &Arc<Self>, id: Uuid) -> Result<()> {
-        let (url, save_path, segments_info, pause_flag, cancel_flag, num_segments) = {
+        let (url, save_path, segments_info, pause_flag, cancel_flag, num_segments, hdrs) = {
             let mut downloads = self.state.lock().unwrap();
 
             let active = self.count_downloading(&downloads);
@@ -431,6 +468,7 @@ impl DownloadEngine {
                 dl.pause_flag.clone(),
                 dl.cancel_flag.clone(),
                 n,
+                dl.headers.clone(),
             )
         };
 
@@ -454,6 +492,7 @@ impl DownloadEngine {
                 pause_flag.clone(),
                 cancel_flag.clone(),
                 seg_limit,
+                hdrs.clone(),
             ));
             new_handles.push(handle);
         }
@@ -496,7 +535,7 @@ impl DownloadEngine {
     }
 
     pub async fn retry(self: &Arc<Self>, id: Uuid) -> Result<DownloadItem> {
-        let (url, save_dir) = {
+        let (url, save_dir, hdrs) = {
             let downloads = self.state.lock().unwrap();
             let dl = downloads
                 .iter()
@@ -507,11 +546,12 @@ impl DownloadEngine {
                 .parent()
                 .unwrap_or_else(|| std::path::Path::new("."))
                 .to_path_buf();
-            (dl.url.clone(), save_dir)
+            (dl.url.clone(), save_dir, dl.headers.clone())
         };
 
         self.remove(id);
-        self.add_download(url, save_dir).await
+        let h = if hdrs.is_empty() { None } else { Some(hdrs) };
+        self.add_download_with_headers(url, save_dir, h).await
     }
 
     /// Auto-start queued downloads that were blocked by concurrency limit.
@@ -1065,6 +1105,7 @@ mod tests {
             category: FileCategory::Archive,
             error: None,
             resumable: true,
+            headers: HashMap::new(),
         }]);
 
         let engine = DownloadEngine::new();
@@ -1103,6 +1144,7 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: true,
+            headers: HashMap::new(),
         }]);
 
         let engine = DownloadEngine::new();
@@ -1135,6 +1177,7 @@ mod tests {
                 category: FileCategory::Other,
                 error: None,
                 resumable: false,
+                headers: HashMap::new(),
             },
             PersistedDownload {
                 id: id2,
@@ -1151,6 +1194,7 @@ mod tests {
                 category: FileCategory::Other,
                 error: None,
                 resumable: false,
+                headers: HashMap::new(),
             },
         ]);
 
@@ -1186,6 +1230,7 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
+            headers: HashMap::new(),
         }]);
 
         let engine = DownloadEngine::new();
@@ -1221,6 +1266,7 @@ mod tests {
                 category: FileCategory::Other,
                 error: Some("timeout".to_string()),
                 resumable: true,
+                headers: HashMap::new(),
             },
             PersistedDownload {
                 id: id_paused,
@@ -1237,6 +1283,7 @@ mod tests {
                 category: FileCategory::Other,
                 error: None,
                 resumable: true,
+                headers: HashMap::new(),
             },
         ]);
 

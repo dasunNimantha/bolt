@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Bolt Download Manager",
+  "description": "Intercept browser downloads and send them to Bolt download manager",
+  "version": "0.1.0",
+  "permissions": [
+    "downloads",
+    "cookies",
+    "nativeMessaging",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Bolt Download Manager"
+  },
+  "icons": {
+    "16": "icons/icon16.svg",
+    "48": "icons/icon48.svg",
+    "128": "icons/icon128.svg"
+  }
+}

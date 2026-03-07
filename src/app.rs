@@ -1,14 +1,17 @@
 use crate::download::engine::DownloadEngine;
 use crate::message::Message;
-use crate::model::{DownloadFilter, DownloadItem, DownloadStatus, HistoryEntry, ViewMode};
+use crate::model::{
+    DownloadFilter, DownloadItem, DownloadStatus, HistoryEntry, PendingDownload, ViewMode,
+};
 use crate::settings::{AppSettings, DownloadDatabase, DownloadHistory, ProxyType};
 use crate::theme::{bolt_theme, ThemeMode};
 use crate::tray::BoltTray;
 use crate::utils::format::format_speed;
 use crate::view::build_view;
 use chrono::Local;
-use iced::{event, window, Application, Command, Element, Event, Subscription, Theme};
-use std::sync::Arc;
+use iced::{window, Element, Subscription, Task, Theme};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -46,18 +49,15 @@ pub struct BoltApp {
     network_check_counter: u32,
     network_client: reqwest::Client,
     history: DownloadHistory,
-    /// Tracks whether we were inside the schedule window on the previous check,
-    /// so we only trigger auto-start on the outside→inside transition.
     schedule_was_active: bool,
+    ipc_pending: Arc<Mutex<Vec<PendingDownload>>>,
+    popup_windows: HashMap<window::Id, PendingDownload>,
+    main_window: Option<window::Id>,
+    system_is_dark: bool,
 }
 
-impl Application for BoltApp {
-    type Message = Message;
-    type Theme = Theme;
-    type Executor = iced::executor::Default;
-    type Flags = ();
-
-    fn new(_flags: ()) -> (Self, Command<Message>) {
+impl BoltApp {
+    pub fn boot() -> (Self, Task<Message>) {
         let settings = AppSettings::load();
         let engine = Arc::new(DownloadEngine::new());
 
@@ -91,6 +91,31 @@ impl Application for BoltApp {
         let tray = BoltTray::new();
         let history = DownloadHistory::load();
         let schedule_was_active = settings.schedule_enabled && settings.is_within_schedule();
+
+        let ipc_pending: Arc<Mutex<Vec<PendingDownload>>> = Arc::new(Mutex::new(Vec::new()));
+
+        let ipc_task = {
+            let pending = ipc_pending.clone();
+            Task::perform(
+                async move {
+                    crate::ipc::start_ipc_server(pending).await;
+                    Message::Noop
+                },
+                |msg| msg,
+            )
+        };
+
+        let (main_id, open_main) = window::open(window::Settings {
+            size: iced::Size::new(1000.0, 650.0),
+            min_size: Some(iced::Size::new(750.0, 450.0)),
+            exit_on_close_request: false,
+            #[cfg(target_os = "linux")]
+            platform_specific: window::settings::PlatformSpecific {
+                application_id: "com.bolt.downloadmanager".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
 
         let mut app = Self {
             engine,
@@ -128,13 +153,30 @@ impl Application for BoltApp {
                 .unwrap_or_default(),
             history,
             schedule_was_active,
+            ipc_pending,
+            popup_windows: HashMap::new(),
+            main_window: Some(main_id),
+            system_is_dark: true,
         };
         app.refresh_snapshots();
 
-        (app, Command::none())
+        let system_theme_task = iced::system::theme()
+            .map(|mode| Message::SystemThemeChanged(mode == iced::theme::Mode::Dark));
+
+        (
+            app,
+            Task::batch([
+                ipc_task,
+                open_main.map(|_| Message::Noop),
+                system_theme_task,
+            ]),
+        )
     }
 
-    fn title(&self) -> String {
+    pub fn title(&self, id: window::Id) -> String {
+        if self.popup_windows.contains_key(&id) {
+            return "Bolt - New Download".to_string();
+        }
         let (total, active, ..) = self.counts;
         if active > 0 {
             format!("Bolt - {} active / {} total", active, total)
@@ -145,18 +187,18 @@ impl Application for BoltApp {
         }
     }
 
-    fn update(&mut self, message: Message) -> Command<Message> {
+    pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::UrlInputChanged(url) => {
                 self.url_input = url;
                 self.error_message = None;
-                Command::none()
+                Task::none()
             }
 
             Message::AddDownload => {
                 let raw = self.url_input.trim().to_string();
                 if raw.is_empty() {
-                    return Command::none();
+                    return Task::none();
                 }
 
                 let urls: Vec<String> = raw
@@ -175,7 +217,7 @@ impl Application for BoltApp {
 
                 if urls.is_empty() {
                     self.error_message = Some("No valid URLs found".to_string());
-                    return Command::none();
+                    return Task::none();
                 }
 
                 self.url_input.clear();
@@ -186,7 +228,7 @@ impl Application for BoltApp {
 
                 if urls.len() == 1 {
                     let url = urls.into_iter().next().unwrap();
-                    Command::perform(
+                    Task::perform(
                         async move {
                             match engine.add_download(url, save_dir).await {
                                 Ok(item) => Message::DownloadAdded(Box::new(item)),
@@ -196,7 +238,7 @@ impl Application for BoltApp {
                         |msg| msg,
                     )
                 } else {
-                    Command::perform(
+                    Task::perform(
                         async move {
                             let total = urls.len();
                             let mut ok = 0usize;
@@ -217,19 +259,19 @@ impl Application for BoltApp {
                 self.error_message = None;
                 self.refresh_snapshots();
                 self.save_downloads();
-                Command::none()
+                Task::none()
             }
 
             Message::DownloadError(err) => {
                 self.adding = false;
                 eprintln!("Download error: {}", err);
                 self.error_message = Some(err);
-                Command::none()
+                Task::none()
             }
 
             Message::StartDownload(id) => {
                 let engine = self.engine.clone();
-                Command::perform(
+                Task::perform(
                     async move {
                         if let Err(e) = engine.start_download(id).await {
                             return Message::DownloadError(e.to_string());
@@ -244,12 +286,12 @@ impl Application for BoltApp {
                 self.engine.pause(id);
                 self.refresh_snapshots();
                 self.save_downloads();
-                Command::none()
+                Task::none()
             }
 
             Message::ResumeDownload(id) => {
                 let engine = self.engine.clone();
-                Command::perform(
+                Task::perform(
                     async move {
                         if let Err(e) = engine.resume(id).await {
                             return Message::DownloadError(e.to_string());
@@ -264,7 +306,7 @@ impl Application for BoltApp {
                 self.engine.cancel(id);
                 self.refresh_snapshots();
                 self.save_downloads();
-                Command::none()
+                Task::none()
             }
 
             Message::RemoveDownload(id) => {
@@ -274,12 +316,12 @@ impl Application for BoltApp {
                 }
                 self.refresh_snapshots();
                 self.save_downloads();
-                Command::none()
+                Task::none()
             }
 
             Message::RetryDownload(id) => {
                 let engine = self.engine.clone();
-                Command::perform(
+                Task::perform(
                     async move {
                         match engine.retry(id).await {
                             Ok(item) => Message::DownloadAdded(Box::new(item)),
@@ -296,37 +338,69 @@ impl Application for BoltApp {
                 self.refresh_snapshots();
                 self.save_downloads();
                 self.history.save();
-                Command::none()
+                Task::none()
             }
 
             Message::SelectDownload(id) => {
                 self.selected = id;
-                Command::none()
+                Task::none()
             }
 
             Message::FilterChanged(filter) => {
                 self.filter = filter;
-                Command::none()
+                Task::none()
             }
 
             Message::ToggleTheme => {
                 self.settings.theme_mode = match self.settings.theme_mode {
                     ThemeMode::Dark => ThemeMode::Light,
-                    ThemeMode::Light => ThemeMode::Dark,
+                    ThemeMode::Light => ThemeMode::System,
+                    ThemeMode::System => ThemeMode::Dark,
                 };
                 self.settings.save();
-                Command::none()
+                Task::none()
             }
 
             Message::SearchChanged(query) => {
                 self.search_query = query;
-                Command::none()
+                Task::none()
+            }
+
+            Message::WindowOpened(id) => {
+                if self.main_window.is_none() {
+                    self.main_window = Some(id);
+                }
+                Task::none()
             }
 
             Message::Tick => {
                 self.engine.update_state();
 
-                // Check for newly completed downloads and add to history
+                {
+                    let new_pending: Vec<PendingDownload> = {
+                        let mut pending = self.ipc_pending.lock().unwrap();
+                        pending.drain(..).collect()
+                    };
+
+                    if !new_pending.is_empty() {
+                        let mut tasks = Vec::new();
+                        for p in new_pending {
+                            let (id, open_task) = window::open(window::Settings {
+                                size: iced::Size::new(520.0, 300.0),
+                                min_size: Some(iced::Size::new(520.0, 300.0)),
+                                max_size: Some(iced::Size::new(520.0, 300.0)),
+                                resizable: false,
+                                level: window::Level::AlwaysOnTop,
+                                exit_on_close_request: false,
+                                ..Default::default()
+                            });
+                            self.popup_windows.insert(id, p);
+                            tasks.push(open_task.map(|_| Message::Noop));
+                        }
+                        return Task::batch(tasks);
+                    }
+                }
+
                 let prev_completed: std::collections::HashSet<Uuid> = self
                     .downloads
                     .iter()
@@ -342,7 +416,6 @@ impl Application for BoltApp {
                 if self.persist_counter.is_multiple_of(8) {
                     self.save_downloads();
 
-                    // Scheduled auto-start: trigger once when the window opens
                     let in_window =
                         self.settings.schedule_enabled && self.settings.is_within_schedule();
                     if in_window && !self.schedule_was_active {
@@ -350,7 +423,7 @@ impl Application for BoltApp {
                         if !queued.is_empty() {
                             self.schedule_was_active = true;
                             let engine = self.engine.clone();
-                            return Command::perform(
+                            return Task::perform(
                                 async move {
                                     for id in queued {
                                         let _ = engine.start_download(id).await;
@@ -363,11 +436,10 @@ impl Application for BoltApp {
                     }
                     self.schedule_was_active = in_window;
 
-                    // Concurrency-blocked downloads: auto-start when a slot frees up
                     let auto_start = self.engine.auto_start_queued();
                     if !auto_start.is_empty() {
                         let engine = self.engine.clone();
-                        return Command::perform(
+                        return Task::perform(
                             async move {
                                 for id in auto_start {
                                     let _ = engine.start_download(id).await;
@@ -379,12 +451,11 @@ impl Application for BoltApp {
                     }
                 }
 
-                // Network connectivity check
                 self.network_check_counter += 1;
                 if self.network_check_counter >= NETWORK_CHECK_INTERVAL {
                     self.network_check_counter = 0;
                     let client = self.network_client.clone();
-                    return Command::perform(
+                    return Task::perform(
                         async move {
                             let ok = client
                                 .head("https://clients3.google.com/generate_204")
@@ -400,19 +471,22 @@ impl Application for BoltApp {
                 if let Some(ref tray) = self.tray {
                     if let Some(action) = tray.poll() {
                         return match action {
-                            crate::tray::TrayAction::Show => Command::batch([
-                                window::change_mode(window::Id::MAIN, window::Mode::Windowed),
-                                window::gain_focus(window::Id::MAIN),
+                            crate::tray::TrayAction::Show => Task::batch([
+                                window::set_mode(self.main_window.unwrap(), window::Mode::Windowed),
+                                window::gain_focus(self.main_window.unwrap()),
                             ]),
                             crate::tray::TrayAction::Quit => {
                                 self.save_downloads();
-                                window::close(window::Id::MAIN)
+                                Task::batch([
+                                    window::close(self.main_window.unwrap()),
+                                    iced::exit(),
+                                ])
                             }
                         };
                     }
                 }
 
-                Command::none()
+                Task::none()
             }
 
             Message::NetworkStatus(online) => {
@@ -423,7 +497,7 @@ impl Application for BoltApp {
                     let failed_ids = self.engine.get_failed_ids();
                     if !failed_ids.is_empty() {
                         let engine = self.engine.clone();
-                        return Command::perform(
+                        return Task::perform(
                             async move {
                                 for id in failed_ids {
                                     let _ = engine.retry(id).await;
@@ -435,14 +509,14 @@ impl Application for BoltApp {
                     }
                 }
 
-                Command::none()
+                Task::none()
             }
 
             Message::OpenFile(id) => {
                 if let Some(dl) = self.downloads.iter().find(|d| d.id == id) {
                     let _ = open_path(&dl.save_path);
                 }
-                Command::none()
+                Task::none()
             }
 
             Message::OpenFolder(id) => {
@@ -451,20 +525,20 @@ impl Application for BoltApp {
                         let _ = open_path(parent);
                     }
                 }
-                Command::none()
+                Task::none()
             }
 
             Message::ShowSettings => {
                 self.view_mode = ViewMode::Settings;
-                Command::none()
+                Task::none()
             }
 
             Message::ShowDownloads => {
                 self.view_mode = ViewMode::Downloads;
-                Command::none()
+                Task::none()
             }
 
-            Message::ChooseDownloadDir => Command::perform(
+            Message::ChooseDownloadDir => Task::perform(
                 async {
                     let handle = rfd::AsyncFileDialog::new()
                         .set_title("Choose Download Directory")
@@ -480,7 +554,7 @@ impl Application for BoltApp {
                     self.settings.download_dir = dir;
                     self.settings.save();
                 }
-                Command::none()
+                Task::none()
             }
 
             Message::SetMaxConcurrent(val) => {
@@ -491,7 +565,7 @@ impl Application for BoltApp {
                     self.engine.set_max_concurrent(n as u64);
                     self.settings.save();
                 }
-                Command::none()
+                Task::none()
             }
 
             Message::SetSpeedLimit(val) => {
@@ -506,7 +580,7 @@ impl Application for BoltApp {
                     self.engine.set_speed_limit(bps);
                     self.settings.save();
                 }
-                Command::none()
+                Task::none()
             }
 
             Message::ClearSpeedLimit => {
@@ -514,13 +588,13 @@ impl Application for BoltApp {
                 self.settings.speed_limit = None;
                 self.engine.set_speed_limit(0);
                 self.settings.save();
-                Command::none()
+                Task::none()
             }
 
             Message::ToggleSchedule => {
                 self.settings.schedule_enabled = !self.settings.schedule_enabled;
                 self.settings.save();
-                Command::none()
+                Task::none()
             }
 
             Message::SetScheduleFromH(val) => {
@@ -529,7 +603,7 @@ impl Application for BoltApp {
                     self.settings.schedule_from.0 = h.min(23);
                     self.settings.save();
                 }
-                Command::none()
+                Task::none()
             }
             Message::SetScheduleFromM(val) => {
                 self.sched_from_m = val;
@@ -537,7 +611,7 @@ impl Application for BoltApp {
                     self.settings.schedule_from.1 = m.min(59);
                     self.settings.save();
                 }
-                Command::none()
+                Task::none()
             }
             Message::SetScheduleToH(val) => {
                 self.sched_to_h = val;
@@ -545,7 +619,7 @@ impl Application for BoltApp {
                     self.settings.schedule_to.0 = h.min(23);
                     self.settings.save();
                 }
-                Command::none()
+                Task::none()
             }
             Message::SetScheduleToM(val) => {
                 self.sched_to_m = val;
@@ -553,31 +627,32 @@ impl Application for BoltApp {
                     self.settings.schedule_to.1 = m.min(59);
                     self.settings.save();
                 }
-                Command::none()
+                Task::none()
             }
 
-            Message::WindowCloseRequested => {
-                let (_total, active, _completed, paused, _failed) = self.counts;
-                if active > 0 || paused > 0 {
-                    self.save_downloads();
-                    window::change_mode(window::Id::MAIN, window::Mode::Hidden)
+            Message::WindowCloseRequested(id) => {
+                if self.popup_windows.remove(&id).is_some() {
+                    return window::close(id);
+                }
+                self.save_downloads();
+                if self.tray.is_some() {
+                    window::set_mode(id, window::Mode::Hidden)
                 } else {
-                    self.save_downloads();
-                    window::close(window::Id::MAIN)
+                    Task::batch([window::close(id), iced::exit()])
                 }
             }
 
-            Message::TrayShow => Command::batch([
-                window::change_mode(window::Id::MAIN, window::Mode::Windowed),
-                window::gain_focus(window::Id::MAIN),
+            Message::TrayShow => Task::batch([
+                window::set_mode(self.main_window.unwrap(), window::Mode::Windowed),
+                window::gain_focus(self.main_window.unwrap()),
             ]),
 
             Message::TrayQuit => {
                 self.save_downloads();
-                window::close(window::Id::MAIN)
+                Task::batch([window::close(self.main_window.unwrap()), iced::exit()])
             }
 
-            Message::ImportFile => Command::perform(
+            Message::ImportFile => Task::perform(
                 async {
                     let handle = rfd::AsyncFileDialog::new()
                         .set_title("Import URLs from text file")
@@ -608,14 +683,14 @@ impl Application for BoltApp {
 
                         if urls.is_empty() {
                             self.error_message = Some("No valid URLs found in file".to_string());
-                            return Command::none();
+                            return Task::none();
                         }
 
                         self.adding = true;
                         let engine = self.engine.clone();
                         let save_dir = self.settings.download_dir.clone();
 
-                        return Command::perform(
+                        return Task::perform(
                             async move {
                                 let total = urls.len();
                                 let mut ok = 0usize;
@@ -631,7 +706,7 @@ impl Application for BoltApp {
                     }
                     self.error_message = Some("Could not read file".to_string());
                 }
-                Command::none()
+                Task::none()
             }
 
             Message::BatchAddResult(ok, total) => {
@@ -648,7 +723,7 @@ impl Application for BoltApp {
                 }
                 self.refresh_snapshots();
                 self.save_downloads();
-                Command::none()
+                Task::none()
             }
 
             Message::SetProxyType(pt) => {
@@ -660,7 +735,7 @@ impl Application for BoltApp {
                     self.apply_proxy();
                 }
                 self.settings.save();
-                Command::none()
+                Task::none()
             }
 
             Message::SetProxyHost(val) => {
@@ -669,7 +744,7 @@ impl Application for BoltApp {
                 self.proxy_test_result = None;
                 self.apply_proxy();
                 self.settings.save();
-                Command::none()
+                Task::none()
             }
 
             Message::SetProxyPort(val) => {
@@ -678,7 +753,7 @@ impl Application for BoltApp {
                 self.proxy_test_result = None;
                 self.apply_proxy();
                 self.settings.save();
-                Command::none()
+                Task::none()
             }
 
             Message::SetProxyUser(val) => {
@@ -687,7 +762,7 @@ impl Application for BoltApp {
                 self.proxy_test_result = None;
                 self.apply_proxy();
                 self.settings.save();
-                Command::none()
+                Task::none()
             }
 
             Message::SetProxyPass(val) => {
@@ -696,18 +771,18 @@ impl Application for BoltApp {
                 self.proxy_test_result = None;
                 self.apply_proxy();
                 self.settings.save();
-                Command::none()
+                Task::none()
             }
 
             Message::TestProxy => {
                 if !self.settings.proxy.is_active() {
                     self.proxy_test_result = Some(Err("Configure proxy host first".to_string()));
-                    return Command::none();
+                    return Task::none();
                 }
                 self.proxy_testing = true;
                 self.proxy_test_result = None;
                 let proxy_url = self.settings.proxy.to_url().unwrap();
-                Command::perform(
+                Task::perform(
                     async move {
                         let proxy = match reqwest::Proxy::all(&proxy_url) {
                             Ok(p) => p,
@@ -777,20 +852,101 @@ impl Application for BoltApp {
             Message::ProxyTestResult(result) => {
                 self.proxy_testing = false;
                 self.proxy_test_result = Some(result);
-                Command::none()
+                Task::none()
             }
 
-            Message::Noop => Command::none(),
+            Message::IpcAcceptStart(popup_id) => {
+                if let Some(pending) = self.popup_windows.remove(&popup_id) {
+                    let engine = self.engine.clone();
+                    let save_dir = self.settings.download_dir.clone();
+                    let headers = if pending.headers.is_empty() {
+                        None
+                    } else {
+                        Some(pending.headers)
+                    };
+                    return Task::batch([
+                        window::close(popup_id),
+                        Task::perform(
+                            async move {
+                                match engine
+                                    .add_download_with_headers(pending.url, save_dir, headers)
+                                    .await
+                                {
+                                    Ok(item) => {
+                                        let id = item.id;
+                                        let _ = engine.start_download(id).await;
+                                        Message::DownloadAdded(Box::new(item))
+                                    }
+                                    Err(e) => Message::DownloadError(e.to_string()),
+                                }
+                            },
+                            |msg| msg,
+                        ),
+                    ]);
+                }
+                Task::none()
+            }
+
+            Message::IpcAcceptQueue(popup_id) => {
+                if let Some(pending) = self.popup_windows.remove(&popup_id) {
+                    let engine = self.engine.clone();
+                    let save_dir = self.settings.download_dir.clone();
+                    let headers = if pending.headers.is_empty() {
+                        None
+                    } else {
+                        Some(pending.headers)
+                    };
+                    return Task::batch([
+                        window::close(popup_id),
+                        Task::perform(
+                            async move {
+                                match engine
+                                    .add_download_with_headers(pending.url, save_dir, headers)
+                                    .await
+                                {
+                                    Ok(item) => Message::DownloadAdded(Box::new(item)),
+                                    Err(e) => Message::DownloadError(e.to_string()),
+                                }
+                            },
+                            |msg| msg,
+                        ),
+                    ]);
+                }
+                Task::none()
+            }
+
+            Message::IpcDismiss(popup_id) => {
+                self.popup_windows.remove(&popup_id);
+                window::close(popup_id)
+            }
+
+            Message::SystemThemeChanged(is_dark) => {
+                self.system_is_dark = is_dark;
+                Task::none()
+            }
+
+            Message::Noop => Task::none(),
         }
     }
 
-    fn view(&self) -> Element<'_, Message> {
+    pub fn view(&self, id: window::Id) -> Element<'_, Message> {
+        let effective_theme = self.settings.theme_mode.effective(self.system_is_dark);
+
+        if let Some(pending) = self.popup_windows.get(&id) {
+            return crate::view::build_popup_window_view(
+                pending,
+                effective_theme,
+                &self.settings.download_dir,
+                id,
+            );
+        }
+
         build_view(
             &self.downloads,
             self.filter,
             &self.url_input,
             self.selected,
-            self.settings.theme_mode,
+            effective_theme,
             self.total_speed,
             self.counts,
             &self.settings.download_dir,
@@ -816,22 +972,21 @@ impl Application for BoltApp {
         )
     }
 
-    fn subscription(&self) -> Subscription<Message> {
-        let close_sub = event::listen_with(|e, _status| match e {
-            Event::Window(_, window::Event::CloseRequested) => Some(Message::WindowCloseRequested),
-            _ => None,
-        });
+    pub fn subscription(&self) -> Subscription<Message> {
+        let open_sub = window::open_events().map(Message::WindowOpened);
+        let close_sub = window::close_requests().map(Message::WindowCloseRequested);
 
         let has_active = self.counts.1 > 0;
         let has_failed = self.counts.4 > 0;
         let has_tray = self.tray.is_some();
+        let has_popup_pending = !self.popup_windows.is_empty();
         let has_scheduled_queued = self.settings.schedule_enabled
             && self
                 .downloads
                 .iter()
                 .any(|d| d.status == DownloadStatus::Queued);
 
-        let tick_sub = if has_active {
+        let tick_sub = if has_active || has_popup_pending {
             iced::time::every(Duration::from_millis(250)).map(|_| Message::Tick)
         } else if has_tray || has_failed || has_scheduled_queued {
             iced::time::every(Duration::from_millis(500)).map(|_| Message::Tick)
@@ -839,15 +994,16 @@ impl Application for BoltApp {
             iced::time::every(Duration::from_secs(5)).map(|_| Message::Tick)
         };
 
-        Subscription::batch([close_sub, tick_sub])
+        let system_theme_sub = iced::system::theme_changes()
+            .map(|mode| Message::SystemThemeChanged(mode == iced::theme::Mode::Dark));
+
+        Subscription::batch([open_sub, close_sub, tick_sub, system_theme_sub])
     }
 
-    fn theme(&self) -> Theme {
-        bolt_theme(self.settings.theme_mode)
+    pub fn theme(&self, _id: window::Id) -> Theme {
+        bolt_theme(self.settings.theme_mode.effective(self.system_is_dark))
     }
-}
 
-impl BoltApp {
     fn refresh_snapshots(&mut self) {
         let (snapshots, speed, counts) = self.engine.get_ui_state();
         self.downloads = snapshots;

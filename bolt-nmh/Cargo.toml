@@ -1,0 +1,11 @@
+[package]
+name = "bolt-nmh"
+version = "0.1.0"
+edition = "2021"
+description = "Native messaging host for Bolt download manager browser extension"
+authors = ["Dasun P"]
+license = "MIT"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
