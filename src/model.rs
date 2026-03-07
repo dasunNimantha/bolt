@@ -1,9 +1,10 @@
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::Instant;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DownloadStatus {
     Queued,
     Connecting,
@@ -32,7 +33,7 @@ impl DownloadStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FileCategory {
     Video,
     Audio,
@@ -112,12 +113,41 @@ impl DownloadFilter {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewMode {
+    Downloads,
+    Settings,
+}
+
 #[derive(Debug, Clone)]
 pub struct SegmentInfo {
     pub index: usize,
     pub start: u64,
     pub end: u64,
     pub downloaded: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedSegment {
+    pub start: u64,
+    pub end: u64,
+    pub downloaded: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedDownload {
+    pub id: Uuid,
+    pub url: String,
+    pub filename: String,
+    pub save_path: PathBuf,
+    pub total_size: Option<u64>,
+    pub status: DownloadStatus,
+    pub segments: Vec<PersistedSegment>,
+    pub category: FileCategory,
+    pub error: Option<String>,
+    pub resumable: bool,
+    #[serde(default)]
+    pub scheduled_at: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -134,6 +164,7 @@ pub struct DownloadItem {
     pub category: FileCategory,
     pub error: Option<String>,
     pub resumable: bool,
+    pub scheduled_at: Option<String>,
 }
 
 impl DownloadItem {
@@ -328,6 +359,7 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
+            scheduled_at: None,
         };
         assert!((item.progress_percent() - 50.0).abs() < 0.01);
     }
@@ -347,6 +379,7 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
+            scheduled_at: None,
         };
         assert!((item.progress_percent() - 0.0).abs() < 0.01);
     }
@@ -366,6 +399,7 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
+            scheduled_at: None,
         };
         assert!((item.progress_percent() - 0.0).abs() < 0.01);
     }
@@ -385,6 +419,7 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
+            scheduled_at: None,
         };
         assert_eq!(item.eta_seconds(), Some(5));
     }
@@ -404,6 +439,7 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
+            scheduled_at: None,
         };
         assert_eq!(item.eta_seconds(), None);
     }
@@ -434,5 +470,89 @@ mod tests {
         let tracker = SpeedTracker::default();
         assert!(tracker.samples.is_empty());
         assert_eq!(tracker.max_samples, 8);
+    }
+
+    #[test]
+    fn persisted_download_serde_roundtrip() {
+        let pd = PersistedDownload {
+            id: Uuid::new_v4(),
+            url: "https://example.com/file.zip".to_string(),
+            filename: "file.zip".to_string(),
+            save_path: PathBuf::from("/tmp/file.zip"),
+            total_size: Some(1024),
+            status: DownloadStatus::Paused,
+            segments: vec![
+                PersistedSegment {
+                    start: 0,
+                    end: 512,
+                    downloaded: 256,
+                },
+                PersistedSegment {
+                    start: 512,
+                    end: 1024,
+                    downloaded: 100,
+                },
+            ],
+            category: FileCategory::Archive,
+            error: None,
+            resumable: true,
+            scheduled_at: Some("2030-01-01T12:00".to_string()),
+        };
+
+        let json = serde_json::to_string(&pd).unwrap();
+        let restored: PersistedDownload = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.id, pd.id);
+        assert_eq!(restored.url, pd.url);
+        assert_eq!(restored.filename, pd.filename);
+        assert_eq!(restored.total_size, pd.total_size);
+        assert_eq!(restored.segments.len(), 2);
+        assert_eq!(restored.segments[0].downloaded, 256);
+        assert_eq!(restored.scheduled_at, Some("2030-01-01T12:00".to_string()));
+    }
+
+    #[test]
+    fn persisted_download_missing_scheduled_at() {
+        let json = r#"{
+            "id": "550e8400-e29b-41d4-a716-446655440000",
+            "url": "https://example.com/f",
+            "filename": "f",
+            "save_path": "/tmp/f",
+            "total_size": null,
+            "status": "Queued",
+            "segments": [],
+            "category": "Other",
+            "error": null,
+            "resumable": false
+        }"#;
+        let pd: PersistedDownload = serde_json::from_str(json).unwrap();
+        assert_eq!(pd.scheduled_at, None);
+    }
+
+    #[test]
+    fn download_item_with_schedule() {
+        let item = DownloadItem {
+            id: Uuid::new_v4(),
+            url: String::new(),
+            filename: String::new(),
+            save_path: PathBuf::new(),
+            total_size: Some(1000),
+            downloaded: 0,
+            status: DownloadStatus::Queued,
+            segments: vec![],
+            speed: 0.0,
+            category: FileCategory::Other,
+            error: None,
+            resumable: false,
+            scheduled_at: Some("2030-06-15T10:30".to_string()),
+        };
+        assert_eq!(item.scheduled_at, Some("2030-06-15T10:30".to_string()));
+    }
+
+    #[test]
+    fn view_mode_equality() {
+        assert_eq!(ViewMode::Downloads, ViewMode::Downloads);
+        assert_eq!(ViewMode::Settings, ViewMode::Settings);
+        assert_ne!(ViewMode::Downloads, ViewMode::Settings);
     }
 }

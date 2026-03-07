@@ -1,6 +1,10 @@
 use crate::download::worker::download_segment;
-use crate::model::{DownloadItem, DownloadStatus, FileCategory, SegmentInfo, SpeedTracker};
+use crate::model::{
+    DownloadItem, DownloadStatus, FileCategory, PersistedSegment, SegmentInfo, SpeedTracker,
+};
+use crate::settings::DownloadDatabase;
 use anyhow::{anyhow, Result};
+use chrono::Local;
 use futures::FutureExt;
 use reqwest::header;
 use std::path::PathBuf;
@@ -32,11 +36,14 @@ struct ManagedDownload {
     cancel_flag: Arc<AtomicBool>,
     speed_tracker: SpeedTracker,
     task_handles: Vec<tokio::task::JoinHandle<Result<()>>>,
+    scheduled_at: Option<String>,
 }
 
 pub struct DownloadEngine {
     state: Mutex<Vec<ManagedDownload>>,
     client: reqwest::Client,
+    speed_limit: AtomicU64,
+    max_concurrent: AtomicU64,
 }
 
 impl Default for DownloadEngine {
@@ -60,7 +67,119 @@ impl DownloadEngine {
         Self {
             state: Mutex::new(Vec::new()),
             client,
+            speed_limit: AtomicU64::new(0),
+            max_concurrent: AtomicU64::new(3),
         }
+    }
+
+    pub fn set_speed_limit(&self, bps: u64) {
+        self.speed_limit.store(bps, Ordering::Relaxed);
+    }
+
+    pub fn get_speed_limit(&self) -> u64 {
+        self.speed_limit.load(Ordering::Relaxed)
+    }
+
+    pub fn set_max_concurrent(&self, max: u64) {
+        self.max_concurrent.store(max, Ordering::Relaxed);
+    }
+
+    pub fn get_max_concurrent(&self) -> u64 {
+        self.max_concurrent.load(Ordering::Relaxed)
+    }
+
+    pub fn restore_downloads(&self, db: &DownloadDatabase) {
+        let mut downloads = self.state.lock().unwrap();
+        for pd in &db.downloads {
+            let segment_states: Vec<SegmentState> = pd
+                .segments
+                .iter()
+                .map(|s| SegmentState {
+                    start: s.start,
+                    end: s.end,
+                    downloaded: Arc::new(AtomicU64::new(s.downloaded)),
+                })
+                .collect();
+
+            let status = match pd.status {
+                DownloadStatus::Downloading | DownloadStatus::Connecting => DownloadStatus::Paused,
+                other => other,
+            };
+
+            downloads.push(ManagedDownload {
+                id: pd.id,
+                url: pd.url.clone(),
+                filename: pd.filename.clone(),
+                save_path: pd.save_path.clone(),
+                total_size: pd.total_size,
+                status,
+                segments: segment_states,
+                category: pd.category,
+                error: pd.error.clone(),
+                resumable: pd.resumable,
+                pause_flag: Arc::new(AtomicBool::new(status == DownloadStatus::Paused)),
+                cancel_flag: Arc::new(AtomicBool::new(false)),
+                speed_tracker: SpeedTracker::new(),
+                task_handles: Vec::new(),
+                scheduled_at: pd.scheduled_at.clone(),
+            });
+        }
+    }
+
+    pub fn persist(&self) -> DownloadDatabase {
+        let downloads = self.state.lock().unwrap();
+        let persisted = downloads
+            .iter()
+            .map(|dl| {
+                let segments: Vec<PersistedSegment> = dl
+                    .segments
+                    .iter()
+                    .map(|s| PersistedSegment {
+                        start: s.start,
+                        end: s.end,
+                        downloaded: s.downloaded.load(Ordering::Relaxed),
+                    })
+                    .collect();
+
+                let status = match dl.status {
+                    DownloadStatus::Downloading | DownloadStatus::Connecting => {
+                        DownloadStatus::Paused
+                    }
+                    other => other,
+                };
+
+                crate::model::PersistedDownload {
+                    id: dl.id,
+                    url: dl.url.clone(),
+                    filename: dl.filename.clone(),
+                    save_path: dl.save_path.clone(),
+                    total_size: dl.total_size,
+                    status,
+                    segments,
+                    category: dl.category,
+                    error: dl.error.clone(),
+                    resumable: dl.resumable,
+                    scheduled_at: dl.scheduled_at.clone(),
+                }
+            })
+            .collect();
+
+        DownloadDatabase::from_persisted(persisted)
+    }
+
+    fn count_downloading(&self, downloads: &[ManagedDownload]) -> usize {
+        downloads
+            .iter()
+            .filter(|d| d.status == DownloadStatus::Downloading)
+            .count()
+    }
+
+    fn per_segment_limit(&self, num_segments: usize) -> u64 {
+        let global = self.speed_limit.load(Ordering::Relaxed);
+        if global == 0 || num_segments == 0 {
+            return 0;
+        }
+        global / num_segments as u64
     }
 
     pub async fn add_download(
@@ -102,7 +221,6 @@ impl DownloadEngine {
         let id = Uuid::new_v4();
 
         let num_segments = calc_segment_count(total_size, resumable);
-
         let segments = create_segments(total_size, num_segments);
 
         let segment_states: Vec<SegmentState> = segments
@@ -129,6 +247,7 @@ impl DownloadEngine {
             category,
             None,
             resumable,
+            None,
         );
 
         let managed = ManagedDownload {
@@ -146,6 +265,7 @@ impl DownloadEngine {
             cancel_flag,
             speed_tracker: SpeedTracker::new(),
             task_handles: Vec::new(),
+            scheduled_at: None,
         };
 
         self.state.lock().unwrap().push(managed);
@@ -153,8 +273,18 @@ impl DownloadEngine {
     }
 
     pub async fn start_download(self: &Arc<Self>, id: Uuid) -> Result<()> {
-        let (url, save_path, total_size, segments_info, pause_flag, cancel_flag) = {
+        let (url, save_path, total_size, segments_info, pause_flag, cancel_flag, num_segments) = {
             let mut downloads = self.state.lock().unwrap();
+
+            let active = self.count_downloading(&downloads);
+            let max = self.max_concurrent.load(Ordering::Relaxed) as usize;
+            if active >= max {
+                return Err(anyhow!(
+                    "Max concurrent downloads reached ({}). Wait for one to finish.",
+                    max
+                ));
+            }
+
             let dl = downloads
                 .iter_mut()
                 .find(|d| d.id == id)
@@ -165,12 +295,15 @@ impl DownloadEngine {
             }
 
             dl.status = DownloadStatus::Downloading;
+            dl.error = None;
 
             let seg_info: Vec<(u64, u64, Arc<AtomicU64>)> = dl
                 .segments
                 .iter()
                 .map(|s| (s.start, s.end, s.downloaded.clone()))
                 .collect();
+
+            let n = seg_info.len();
 
             (
                 dl.url.clone(),
@@ -179,6 +312,7 @@ impl DownloadEngine {
                 seg_info,
                 dl.pause_flag.clone(),
                 dl.cancel_flag.clone(),
+                n,
             )
         };
 
@@ -192,6 +326,8 @@ impl DownloadEngine {
             file.set_len(size).await?;
         }
 
+        let seg_limit = self.per_segment_limit(num_segments);
+
         let mut task_handles = Vec::new();
         for (start, end, downloaded) in segments_info {
             let handle = tokio::spawn(download_segment(
@@ -203,6 +339,7 @@ impl DownloadEngine {
                 downloaded,
                 pause_flag.clone(),
                 cancel_flag.clone(),
+                seg_limit,
             ));
             task_handles.push(handle);
         }
@@ -227,8 +364,18 @@ impl DownloadEngine {
     }
 
     pub async fn resume(self: &Arc<Self>, id: Uuid) -> Result<()> {
-        let (url, save_path, segments_info, pause_flag, cancel_flag) = {
+        let (url, save_path, segments_info, pause_flag, cancel_flag, num_segments) = {
             let mut downloads = self.state.lock().unwrap();
+
+            let active = self.count_downloading(&downloads);
+            let max = self.max_concurrent.load(Ordering::Relaxed) as usize;
+            if active >= max {
+                return Err(anyhow!(
+                    "Max concurrent downloads reached ({}). Wait for one to finish.",
+                    max
+                ));
+            }
+
             let dl = downloads
                 .iter_mut()
                 .find(|d| d.id == id)
@@ -252,14 +399,19 @@ impl DownloadEngine {
                 .map(|s| (s.start, s.end, s.downloaded.clone()))
                 .collect();
 
+            let n = seg_info.len();
+
             (
                 dl.url.clone(),
                 dl.save_path.clone(),
                 seg_info,
                 dl.pause_flag.clone(),
                 dl.cancel_flag.clone(),
+                n,
             )
         };
+
+        let seg_limit = self.per_segment_limit(num_segments);
 
         let mut new_handles = Vec::new();
         for (start, end, downloaded) in segments_info {
@@ -277,6 +429,7 @@ impl DownloadEngine {
                 downloaded,
                 pause_flag.clone(),
                 cancel_flag.clone(),
+                seg_limit,
             ));
             new_handles.push(handle);
         }
@@ -337,6 +490,54 @@ impl DownloadEngine {
         self.add_download(url, save_dir).await
     }
 
+    pub fn set_schedule(&self, id: Uuid, scheduled_at: Option<String>) {
+        let mut downloads = self.state.lock().unwrap();
+        if let Some(dl) = downloads.iter_mut().find(|d| d.id == id) {
+            dl.scheduled_at = scheduled_at;
+        }
+    }
+
+    /// Returns IDs of scheduled downloads that are due now.
+    pub fn check_scheduled(&self) -> Vec<Uuid> {
+        let downloads = self.state.lock().unwrap();
+        let now = Local::now();
+        let mut due = Vec::new();
+
+        for dl in downloads.iter() {
+            if dl.status != DownloadStatus::Queued {
+                continue;
+            }
+            if let Some(ref sched) = dl.scheduled_at {
+                if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(sched, "%Y-%m-%dT%H:%M") {
+                    if now.naive_local() >= dt {
+                        due.push(dl.id);
+                    }
+                }
+            }
+        }
+
+        due
+    }
+
+    /// Auto-start queued downloads if slots are available. Returns IDs that were auto-started.
+    pub fn auto_start_queued(&self) -> Vec<Uuid> {
+        let downloads = self.state.lock().unwrap();
+        let active = self.count_downloading(&downloads);
+        let max = self.max_concurrent.load(Ordering::Relaxed) as usize;
+
+        if active >= max {
+            return Vec::new();
+        }
+
+        let slots = max - active;
+        downloads
+            .iter()
+            .filter(|d| d.status == DownloadStatus::Queued && d.scheduled_at.is_none())
+            .take(slots)
+            .map(|d| d.id)
+            .collect()
+    }
+
     pub fn update_state(&self) {
         let mut downloads = self.state.lock().unwrap();
         for dl in downloads.iter_mut() {
@@ -393,6 +594,7 @@ impl DownloadEngine {
                     }
                 } else {
                     dl.status = DownloadStatus::Completed;
+                    dl.scheduled_at = None;
                 }
                 dl.speed_tracker.reset();
                 continue;
@@ -440,6 +642,7 @@ impl DownloadEngine {
                 dl.category,
                 dl.error.clone(),
                 dl.resumable,
+                dl.scheduled_at.clone(),
             ));
         }
 
@@ -463,7 +666,6 @@ fn calc_segment_count(total_size: Option<u64>, resumable: bool) -> usize {
 
     let by_size = (size / MIN_SEGMENT_SIZE) as usize;
 
-    // Scale: <5MB=1, <20MB=2, <50MB=4, <200MB=6, >=200MB=8
     let target = if size < 5 * 1024 * 1024 {
         1
     } else if size < 20 * 1024 * 1024 {
@@ -572,6 +774,7 @@ fn build_snapshot(
     category: FileCategory,
     error: Option<String>,
     resumable: bool,
+    scheduled_at: Option<String>,
 ) -> DownloadItem {
     let raw_downloaded: u64 = segments
         .iter()
@@ -607,14 +810,13 @@ fn build_snapshot(
         category,
         error,
         resumable,
+        scheduled_at,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // --- calc_segment_count ---
 
     #[test]
     fn segment_count_not_resumable() {
@@ -650,8 +852,6 @@ mod tests {
     fn segment_count_very_large_file() {
         assert_eq!(calc_segment_count(Some(500 * 1024 * 1024), true), 8);
     }
-
-    // --- create_segments ---
 
     #[test]
     fn segments_unknown_size() {
@@ -701,8 +901,6 @@ mod tests {
         assert_eq!(covered, total);
     }
 
-    // --- parse_content_disposition ---
-
     #[test]
     fn content_disposition_simple_filename() {
         let result = parse_content_disposition("attachment; filename=\"report.pdf\"");
@@ -735,8 +933,6 @@ mod tests {
         assert_eq!(result, None);
     }
 
-    // --- urldecode ---
-
     #[test]
     fn urldecode_plain() {
         assert_eq!(urldecode("hello"), "hello");
@@ -761,8 +957,6 @@ mod tests {
     fn urldecode_special_chars() {
         assert_eq!(urldecode("%2Fpath%2Fto%2Ffile"), "/path/to/file");
     }
-
-    // --- DownloadEngine ---
 
     #[test]
     fn engine_default() {
@@ -799,5 +993,291 @@ mod tests {
     fn engine_cancel_nonexistent() {
         let engine = DownloadEngine::new();
         engine.cancel(Uuid::new_v4());
+    }
+
+    #[test]
+    fn engine_speed_limit() {
+        let engine = DownloadEngine::new();
+        assert_eq!(engine.get_speed_limit(), 0);
+        engine.set_speed_limit(1_000_000);
+        assert_eq!(engine.get_speed_limit(), 1_000_000);
+    }
+
+    #[test]
+    fn engine_max_concurrent() {
+        let engine = DownloadEngine::new();
+        assert_eq!(engine.get_max_concurrent(), 3);
+        engine.set_max_concurrent(5);
+        assert_eq!(engine.get_max_concurrent(), 5);
+    }
+
+    #[test]
+    fn engine_per_segment_limit() {
+        let engine = DownloadEngine::new();
+        assert_eq!(engine.per_segment_limit(4), 0);
+        engine.set_speed_limit(1_000_000);
+        assert_eq!(engine.per_segment_limit(4), 250_000);
+        assert_eq!(engine.per_segment_limit(0), 0);
+    }
+
+    #[test]
+    fn engine_persist_empty() {
+        let engine = DownloadEngine::new();
+        let db = engine.persist();
+        assert!(db.downloads.is_empty());
+    }
+
+    #[test]
+    fn engine_restore_and_persist_roundtrip() {
+        use crate::model::{PersistedDownload, PersistedSegment};
+        use crate::settings::DownloadDatabase;
+
+        let id = Uuid::new_v4();
+        let db = DownloadDatabase::from_persisted(vec![PersistedDownload {
+            id,
+            url: "https://example.com/file.zip".to_string(),
+            filename: "file.zip".to_string(),
+            save_path: PathBuf::from("/tmp/file.zip"),
+            total_size: Some(1024),
+            status: DownloadStatus::Paused,
+            segments: vec![PersistedSegment {
+                start: 0,
+                end: 1024,
+                downloaded: 512,
+            }],
+            category: FileCategory::Archive,
+            error: None,
+            resumable: true,
+            scheduled_at: None,
+        }]);
+
+        let engine = DownloadEngine::new();
+        engine.restore_downloads(&db);
+
+        let (snapshots, _, counts) = engine.get_ui_state();
+        assert_eq!(counts.0, 1);
+        assert_eq!(snapshots[0].id, id);
+        assert_eq!(snapshots[0].filename, "file.zip");
+        assert_eq!(snapshots[0].status, DownloadStatus::Paused);
+        assert_eq!(snapshots[0].downloaded, 512);
+
+        let persisted = engine.persist();
+        assert_eq!(persisted.downloads.len(), 1);
+        assert_eq!(persisted.downloads[0].id, id);
+        assert_eq!(persisted.downloads[0].segments[0].downloaded, 512);
+    }
+
+    #[test]
+    fn engine_restore_downloading_becomes_paused() {
+        use crate::model::{PersistedDownload, PersistedSegment};
+        use crate::settings::DownloadDatabase;
+
+        let db = DownloadDatabase::from_persisted(vec![PersistedDownload {
+            id: Uuid::new_v4(),
+            url: "https://example.com/f.bin".to_string(),
+            filename: "f.bin".to_string(),
+            save_path: PathBuf::from("/tmp/f.bin"),
+            total_size: Some(2048),
+            status: DownloadStatus::Downloading,
+            segments: vec![PersistedSegment {
+                start: 0,
+                end: 2048,
+                downloaded: 1000,
+            }],
+            category: FileCategory::Other,
+            error: None,
+            resumable: true,
+            scheduled_at: None,
+        }]);
+
+        let engine = DownloadEngine::new();
+        engine.restore_downloads(&db);
+
+        let (snapshots, _, _) = engine.get_ui_state();
+        assert_eq!(snapshots[0].status, DownloadStatus::Paused);
+    }
+
+    #[test]
+    fn engine_set_schedule() {
+        use crate::model::{PersistedDownload, PersistedSegment};
+        use crate::settings::DownloadDatabase;
+
+        let id = Uuid::new_v4();
+        let db = DownloadDatabase::from_persisted(vec![PersistedDownload {
+            id,
+            url: "https://example.com/f.bin".to_string(),
+            filename: "f.bin".to_string(),
+            save_path: PathBuf::from("/tmp/f.bin"),
+            total_size: Some(1024),
+            status: DownloadStatus::Queued,
+            segments: vec![PersistedSegment {
+                start: 0,
+                end: 1024,
+                downloaded: 0,
+            }],
+            category: FileCategory::Other,
+            error: None,
+            resumable: true,
+            scheduled_at: None,
+        }]);
+
+        let engine = DownloadEngine::new();
+        engine.restore_downloads(&db);
+
+        engine.set_schedule(id, Some("2030-01-01T00:00".to_string()));
+        let (snapshots, _, _) = engine.get_ui_state();
+        assert_eq!(
+            snapshots[0].scheduled_at,
+            Some("2030-01-01T00:00".to_string())
+        );
+
+        engine.set_schedule(id, None);
+        let (snapshots, _, _) = engine.get_ui_state();
+        assert_eq!(snapshots[0].scheduled_at, None);
+    }
+
+    #[test]
+    fn engine_check_scheduled_not_due() {
+        use crate::model::{PersistedDownload, PersistedSegment};
+        use crate::settings::DownloadDatabase;
+
+        let id = Uuid::new_v4();
+        let db = DownloadDatabase::from_persisted(vec![PersistedDownload {
+            id,
+            url: "https://example.com/f.bin".to_string(),
+            filename: "f.bin".to_string(),
+            save_path: PathBuf::from("/tmp/f.bin"),
+            total_size: Some(1024),
+            status: DownloadStatus::Queued,
+            segments: vec![PersistedSegment {
+                start: 0,
+                end: 1024,
+                downloaded: 0,
+            }],
+            category: FileCategory::Other,
+            error: None,
+            resumable: true,
+            scheduled_at: Some("2030-12-31T23:59".to_string()),
+        }]);
+
+        let engine = DownloadEngine::new();
+        engine.restore_downloads(&db);
+
+        let due = engine.check_scheduled();
+        assert!(due.is_empty());
+    }
+
+    #[test]
+    fn engine_check_scheduled_past_due() {
+        use crate::model::{PersistedDownload, PersistedSegment};
+        use crate::settings::DownloadDatabase;
+
+        let id = Uuid::new_v4();
+        let db = DownloadDatabase::from_persisted(vec![PersistedDownload {
+            id,
+            url: "https://example.com/f.bin".to_string(),
+            filename: "f.bin".to_string(),
+            save_path: PathBuf::from("/tmp/f.bin"),
+            total_size: Some(1024),
+            status: DownloadStatus::Queued,
+            segments: vec![PersistedSegment {
+                start: 0,
+                end: 1024,
+                downloaded: 0,
+            }],
+            category: FileCategory::Other,
+            error: None,
+            resumable: true,
+            scheduled_at: Some("2020-01-01T00:00".to_string()),
+        }]);
+
+        let engine = DownloadEngine::new();
+        engine.restore_downloads(&db);
+
+        let due = engine.check_scheduled();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0], id);
+    }
+
+    #[test]
+    fn engine_auto_start_queued_respects_limit() {
+        use crate::model::{PersistedDownload, PersistedSegment};
+        use crate::settings::DownloadDatabase;
+
+        let id1 = Uuid::new_v4();
+        let id2 = Uuid::new_v4();
+        let db = DownloadDatabase::from_persisted(vec![
+            PersistedDownload {
+                id: id1,
+                url: "https://example.com/a.bin".to_string(),
+                filename: "a.bin".to_string(),
+                save_path: PathBuf::from("/tmp/a.bin"),
+                total_size: Some(1024),
+                status: DownloadStatus::Queued,
+                segments: vec![PersistedSegment {
+                    start: 0,
+                    end: 1024,
+                    downloaded: 0,
+                }],
+                category: FileCategory::Other,
+                error: None,
+                resumable: false,
+                scheduled_at: None,
+            },
+            PersistedDownload {
+                id: id2,
+                url: "https://example.com/b.bin".to_string(),
+                filename: "b.bin".to_string(),
+                save_path: PathBuf::from("/tmp/b.bin"),
+                total_size: Some(1024),
+                status: DownloadStatus::Queued,
+                segments: vec![PersistedSegment {
+                    start: 0,
+                    end: 1024,
+                    downloaded: 0,
+                }],
+                category: FileCategory::Other,
+                error: None,
+                resumable: false,
+                scheduled_at: None,
+            },
+        ]);
+
+        let engine = DownloadEngine::new();
+        engine.set_max_concurrent(1);
+        engine.restore_downloads(&db);
+
+        let auto = engine.auto_start_queued();
+        assert_eq!(auto.len(), 1);
+    }
+
+    #[test]
+    fn engine_auto_start_skips_scheduled() {
+        use crate::model::{PersistedDownload, PersistedSegment};
+        use crate::settings::DownloadDatabase;
+
+        let db = DownloadDatabase::from_persisted(vec![PersistedDownload {
+            id: Uuid::new_v4(),
+            url: "https://example.com/f.bin".to_string(),
+            filename: "f.bin".to_string(),
+            save_path: PathBuf::from("/tmp/f.bin"),
+            total_size: Some(1024),
+            status: DownloadStatus::Queued,
+            segments: vec![PersistedSegment {
+                start: 0,
+                end: 1024,
+                downloaded: 0,
+            }],
+            category: FileCategory::Other,
+            error: None,
+            resumable: false,
+            scheduled_at: Some("2030-01-01T00:00".to_string()),
+        }]);
+
+        let engine = DownloadEngine::new();
+        engine.restore_downloads(&db);
+
+        let auto = engine.auto_start_queued();
+        assert!(auto.is_empty());
     }
 }

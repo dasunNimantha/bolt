@@ -27,10 +27,19 @@ pub enum Message {
     Tick,
     OpenFile(Uuid),
     OpenFolder(Uuid),
+    ShowSettings,
+    ShowDownloads,
 
     // Settings
     ChooseDownloadDir,
     DownloadDirChosen(Option<std::path::PathBuf>),
+    SetMaxConcurrent(String),
+    SetSpeedLimit(String),
+    ClearSpeedLimit,
+
+    // Scheduling
+    ScheduleDownload(Uuid, String),
+    ClearSchedule(Uuid),
 
     Noop,
 }

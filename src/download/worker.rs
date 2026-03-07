@@ -4,7 +4,7 @@ use reqwest::header;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 const MAX_RETRIES: u32 = 3;
@@ -20,6 +20,7 @@ pub async fn download_segment(
     downloaded: Arc<AtomicU64>,
     pause_flag: Arc<AtomicBool>,
     cancel_flag: Arc<AtomicBool>,
+    per_segment_limit: u64,
 ) -> Result<()> {
     for attempt in 0..=MAX_RETRIES {
         if cancel_flag.load(Ordering::Relaxed) {
@@ -35,6 +36,7 @@ pub async fn download_segment(
             &downloaded,
             &pause_flag,
             &cancel_flag,
+            per_segment_limit,
         )
         .await
         {
@@ -73,6 +75,7 @@ async fn try_download_segment(
     downloaded: &Arc<AtomicU64>,
     pause_flag: &Arc<AtomicBool>,
     cancel_flag: &Arc<AtomicBool>,
+    per_segment_limit: u64,
 ) -> Result<()> {
     let already_downloaded = downloaded.load(Ordering::Relaxed);
     let actual_start = start + already_downloaded;
@@ -107,6 +110,8 @@ async fn try_download_segment(
 
     let mut stream = response.bytes_stream();
     let mut buf = Vec::with_capacity(WRITE_BUF_SIZE);
+    let mut window_start = Instant::now();
+    let mut window_bytes: u64 = 0;
 
     while let Some(chunk_result) = stream.next().await {
         if cancel_flag.load(Ordering::Relaxed) || pause_flag.load(Ordering::Relaxed) {
@@ -118,10 +123,40 @@ async fn try_download_segment(
         buf.extend_from_slice(&chunk);
 
         if buf.len() >= WRITE_BUF_SIZE {
+            let flushed = buf.len() as u64;
             flush_buf(&mut file, &mut buf, downloaded).await?;
+
+            if per_segment_limit > 0 {
+                window_bytes += flushed;
+                throttle(per_segment_limit, &mut window_start, &mut window_bytes).await;
+            }
         }
     }
 
-    flush_buf(&mut file, &mut buf, downloaded).await?;
+    if !buf.is_empty() {
+        let flushed = buf.len() as u64;
+        flush_buf(&mut file, &mut buf, downloaded).await?;
+
+        if per_segment_limit > 0 {
+            window_bytes += flushed;
+            throttle(per_segment_limit, &mut window_start, &mut window_bytes).await;
+        }
+    }
+
     Ok(())
+}
+
+async fn throttle(limit_bps: u64, window_start: &mut Instant, window_bytes: &mut u64) {
+    let elapsed = window_start.elapsed().as_secs_f64();
+    let expected = *window_bytes as f64 / limit_bps as f64;
+    if expected > elapsed {
+        let sleep_ms = ((expected - elapsed) * 1000.0) as u64;
+        if sleep_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
+        }
+    }
+    if window_start.elapsed().as_secs() >= 1 {
+        *window_start = Instant::now();
+        *window_bytes = 0;
+    }
 }

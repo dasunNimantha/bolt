@@ -1,7 +1,7 @@
 use crate::download::engine::DownloadEngine;
 use crate::message::Message;
-use crate::model::{DownloadFilter, DownloadItem};
-use crate::settings::AppSettings;
+use crate::model::{DownloadFilter, DownloadItem, ViewMode};
+use crate::settings::{AppSettings, DownloadDatabase};
 use crate::theme::{bolt_theme, ThemeMode};
 use crate::view::build_view;
 use iced::{Application, Command, Element, Subscription, Theme};
@@ -15,12 +15,15 @@ pub struct BoltApp {
     selected: Option<Uuid>,
     url_input: String,
     filter: DownloadFilter,
-    theme_mode: ThemeMode,
     settings: AppSettings,
     total_speed: f64,
     counts: (usize, usize, usize, usize, usize),
     error_message: Option<String>,
     adding: bool,
+    view_mode: ViewMode,
+    speed_limit_input: String,
+    max_concurrent_input: String,
+    persist_counter: u32,
 }
 
 impl Application for BoltApp {
@@ -33,19 +36,37 @@ impl Application for BoltApp {
         let settings = AppSettings::load();
         let engine = Arc::new(DownloadEngine::new());
 
-        let app = Self {
+        if let Some(limit) = settings.speed_limit {
+            engine.set_speed_limit(limit);
+        }
+        engine.set_max_concurrent(settings.max_concurrent as u64);
+
+        let db = DownloadDatabase::load();
+        engine.restore_downloads(&db);
+
+        let speed_limit_input = match settings.speed_limit {
+            Some(bps) => format!("{}", bps / 1024),
+            None => String::new(),
+        };
+        let max_concurrent_input = format!("{}", settings.max_concurrent);
+
+        let mut app = Self {
             engine,
             downloads: Vec::new(),
             selected: None,
             url_input: String::new(),
             filter: DownloadFilter::All,
-            theme_mode: ThemeMode::Dark,
             settings,
             total_speed: 0.0,
             counts: (0, 0, 0, 0, 0),
             error_message: None,
             adding: false,
+            view_mode: ViewMode::Downloads,
+            speed_limit_input,
+            max_concurrent_input,
+            persist_counter: 0,
         };
+        app.refresh_snapshots();
 
         (app, Command::none())
     }
@@ -105,6 +126,7 @@ impl Application for BoltApp {
                 self.adding = false;
                 self.error_message = None;
                 self.refresh_snapshots();
+                self.save_downloads();
                 Command::none()
             }
 
@@ -131,6 +153,7 @@ impl Application for BoltApp {
             Message::PauseDownload(id) => {
                 self.engine.pause(id);
                 self.refresh_snapshots();
+                self.save_downloads();
                 Command::none()
             }
 
@@ -138,7 +161,9 @@ impl Application for BoltApp {
                 let engine = self.engine.clone();
                 Command::perform(
                     async move {
-                        let _ = engine.resume(id).await;
+                        if let Err(e) = engine.resume(id).await {
+                            return Message::DownloadError(e.to_string());
+                        }
                         Message::Tick
                     },
                     |msg| msg,
@@ -148,6 +173,7 @@ impl Application for BoltApp {
             Message::CancelDownload(id) => {
                 self.engine.cancel(id);
                 self.refresh_snapshots();
+                self.save_downloads();
                 Command::none()
             }
 
@@ -157,6 +183,7 @@ impl Application for BoltApp {
                     self.selected = None;
                 }
                 self.refresh_snapshots();
+                self.save_downloads();
                 Command::none()
             }
 
@@ -176,6 +203,7 @@ impl Application for BoltApp {
             Message::ClearCompleted => {
                 self.engine.clear_completed();
                 self.refresh_snapshots();
+                self.save_downloads();
                 Command::none()
             }
 
@@ -190,16 +218,51 @@ impl Application for BoltApp {
             }
 
             Message::ToggleTheme => {
-                self.theme_mode = match self.theme_mode {
+                self.settings.theme_mode = match self.settings.theme_mode {
                     ThemeMode::Dark => ThemeMode::Light,
                     ThemeMode::Light => ThemeMode::Dark,
                 };
+                self.settings.save();
                 Command::none()
             }
 
             Message::Tick => {
                 self.engine.update_state();
                 self.refresh_snapshots();
+
+                self.persist_counter += 1;
+                if self.persist_counter.is_multiple_of(8) {
+                    self.save_downloads();
+
+                    let due = self.engine.check_scheduled();
+                    if !due.is_empty() {
+                        let engine = self.engine.clone();
+                        return Command::perform(
+                            async move {
+                                for id in due {
+                                    let _ = engine.start_download(id).await;
+                                }
+                                Message::Tick
+                            },
+                            |msg| msg,
+                        );
+                    }
+
+                    let auto_start = self.engine.auto_start_queued();
+                    if !auto_start.is_empty() {
+                        let engine = self.engine.clone();
+                        return Command::perform(
+                            async move {
+                                for id in auto_start {
+                                    let _ = engine.start_download(id).await;
+                                }
+                                Message::Tick
+                            },
+                            |msg| msg,
+                        );
+                    }
+                }
+
                 Command::none()
             }
 
@@ -216,6 +279,16 @@ impl Application for BoltApp {
                         let _ = open_path(parent);
                     }
                 }
+                Command::none()
+            }
+
+            Message::ShowSettings => {
+                self.view_mode = ViewMode::Settings;
+                Command::none()
+            }
+
+            Message::ShowDownloads => {
+                self.view_mode = ViewMode::Downloads;
                 Command::none()
             }
 
@@ -238,6 +311,54 @@ impl Application for BoltApp {
                 Command::none()
             }
 
+            Message::SetMaxConcurrent(val) => {
+                self.max_concurrent_input = val.clone();
+                if let Ok(n) = val.parse::<usize>() {
+                    let n = n.clamp(1, 10);
+                    self.settings.max_concurrent = n;
+                    self.engine.set_max_concurrent(n as u64);
+                    self.settings.save();
+                }
+                Command::none()
+            }
+
+            Message::SetSpeedLimit(val) => {
+                self.speed_limit_input = val.clone();
+                if val.is_empty() {
+                    self.settings.speed_limit = None;
+                    self.engine.set_speed_limit(0);
+                    self.settings.save();
+                } else if let Ok(kb) = val.parse::<u64>() {
+                    let bps = kb * 1024;
+                    self.settings.speed_limit = Some(bps);
+                    self.engine.set_speed_limit(bps);
+                    self.settings.save();
+                }
+                Command::none()
+            }
+
+            Message::ClearSpeedLimit => {
+                self.speed_limit_input.clear();
+                self.settings.speed_limit = None;
+                self.engine.set_speed_limit(0);
+                self.settings.save();
+                Command::none()
+            }
+
+            Message::ScheduleDownload(id, datetime) => {
+                self.engine.set_schedule(id, Some(datetime));
+                self.refresh_snapshots();
+                self.save_downloads();
+                Command::none()
+            }
+
+            Message::ClearSchedule(id) => {
+                self.engine.set_schedule(id, None);
+                self.refresh_snapshots();
+                self.save_downloads();
+                Command::none()
+            }
+
             Message::Noop => Command::none(),
         }
     }
@@ -248,17 +369,27 @@ impl Application for BoltApp {
             self.filter,
             &self.url_input,
             self.selected,
-            self.theme_mode,
+            self.settings.theme_mode,
             self.total_speed,
             self.counts,
             &self.settings.download_dir,
             self.error_message.as_deref(),
             self.adding,
+            self.view_mode,
+            &self.settings,
+            &self.speed_limit_input,
+            &self.max_concurrent_input,
         )
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        if self.counts.1 > 0 {
+        let has_active = self.counts.1 > 0;
+        let has_scheduled = self
+            .downloads
+            .iter()
+            .any(|d| d.scheduled_at.is_some() && d.status == crate::model::DownloadStatus::Queued);
+
+        if has_active || has_scheduled {
             iced::time::every(Duration::from_millis(250)).map(|_| Message::Tick)
         } else {
             Subscription::none()
@@ -266,7 +397,7 @@ impl Application for BoltApp {
     }
 
     fn theme(&self) -> Theme {
-        bolt_theme(self.theme_mode)
+        bolt_theme(self.settings.theme_mode)
     }
 }
 
@@ -276,6 +407,11 @@ impl BoltApp {
         self.downloads = snapshots;
         self.total_speed = speed;
         self.counts = counts;
+    }
+
+    fn save_downloads(&self) {
+        let db = self.engine.persist();
+        db.save();
     }
 }
 
