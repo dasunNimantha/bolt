@@ -120,43 +120,28 @@ async fn try_download_segment(
         }
 
         let chunk = chunk_result?;
+        let chunk_len = chunk.len() as u64;
         buf.extend_from_slice(&chunk);
 
-        if buf.len() >= WRITE_BUF_SIZE {
-            let flushed = buf.len() as u64;
-            flush_buf(&mut file, &mut buf, downloaded).await?;
-
-            if per_segment_limit > 0 {
-                window_bytes += flushed;
-                throttle(per_segment_limit, &mut window_start, &mut window_bytes).await;
+        if per_segment_limit > 0 {
+            window_bytes += chunk_len;
+            let elapsed = window_start.elapsed().as_secs_f64();
+            let expected = window_bytes as f64 / per_segment_limit as f64;
+            if expected > elapsed + 0.005 {
+                let sleep_ms = ((expected - elapsed) * 1000.0) as u64;
+                tokio::time::sleep(Duration::from_millis(sleep_ms.min(50))).await;
+            }
+            if window_start.elapsed().as_millis() >= 1000 {
+                window_start = Instant::now();
+                window_bytes = 0;
             }
         }
-    }
 
-    if !buf.is_empty() {
-        let flushed = buf.len() as u64;
-        flush_buf(&mut file, &mut buf, downloaded).await?;
-
-        if per_segment_limit > 0 {
-            window_bytes += flushed;
-            throttle(per_segment_limit, &mut window_start, &mut window_bytes).await;
+        if buf.len() >= WRITE_BUF_SIZE {
+            flush_buf(&mut file, &mut buf, downloaded).await?;
         }
     }
 
+    flush_buf(&mut file, &mut buf, downloaded).await?;
     Ok(())
-}
-
-async fn throttle(limit_bps: u64, window_start: &mut Instant, window_bytes: &mut u64) {
-    let elapsed = window_start.elapsed().as_secs_f64();
-    let expected = *window_bytes as f64 / limit_bps as f64;
-    if expected > elapsed {
-        let sleep_ms = ((expected - elapsed) * 1000.0) as u64;
-        if sleep_ms > 0 {
-            tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
-        }
-    }
-    if window_start.elapsed().as_secs() >= 1 {
-        *window_start = Instant::now();
-        *window_bytes = 0;
-    }
 }
