@@ -29,11 +29,18 @@ pub struct BoltApp {
     view_mode: ViewMode,
     speed_limit_input: String,
     max_concurrent_input: String,
+    sched_from_h: String,
+    sched_from_m: String,
+    sched_to_h: String,
+    sched_to_m: String,
     persist_counter: u32,
     tray: Option<BoltTray>,
     network_online: bool,
     network_check_counter: u32,
     history: DownloadHistory,
+    /// Tracks whether we were inside the schedule window on the previous check,
+    /// so we only trigger auto-start on the outside→inside transition.
+    schedule_was_active: bool,
 }
 
 impl Application for BoltApp {
@@ -59,9 +66,15 @@ impl Application for BoltApp {
             None => String::new(),
         };
         let max_concurrent_input = format!("{}", settings.max_concurrent);
+        let sched_from_h = format!("{:02}", settings.schedule_from.0);
+        let sched_from_m = format!("{:02}", settings.schedule_from.1);
+        let sched_to_h = format!("{:02}", settings.schedule_to.0);
+        let sched_to_m = format!("{:02}", settings.schedule_to.1);
 
         let tray = BoltTray::new();
         let history = DownloadHistory::load();
+        let schedule_was_active =
+            settings.schedule_enabled && settings.is_within_schedule();
 
         let mut app = Self {
             engine,
@@ -78,11 +91,16 @@ impl Application for BoltApp {
             view_mode: ViewMode::Downloads,
             speed_limit_input,
             max_concurrent_input,
+            sched_from_h,
+            sched_from_m,
+            sched_to_h,
+            sched_to_m,
             persist_counter: 0,
             tray,
             network_online: true,
             network_check_counter: 0,
             history,
+            schedule_was_active,
         };
         app.refresh_snapshots();
 
@@ -265,20 +283,28 @@ impl Application for BoltApp {
                 if self.persist_counter.is_multiple_of(8) {
                     self.save_downloads();
 
-                    let due = self.engine.check_scheduled();
-                    if !due.is_empty() {
-                        let engine = self.engine.clone();
-                        return Command::perform(
-                            async move {
-                                for id in due {
-                                    let _ = engine.start_download(id).await;
-                                }
-                                Message::Tick
-                            },
-                            |msg| msg,
-                        );
+                    // Scheduled auto-start: trigger once when the window opens
+                    let in_window = self.settings.schedule_enabled
+                        && self.settings.is_within_schedule();
+                    if in_window && !self.schedule_was_active {
+                        let queued = self.engine.get_queued_ids();
+                        if !queued.is_empty() {
+                            self.schedule_was_active = true;
+                            let engine = self.engine.clone();
+                            return Command::perform(
+                                async move {
+                                    for id in queued {
+                                        let _ = engine.start_download(id).await;
+                                    }
+                                    Message::Tick
+                                },
+                                |msg| msg,
+                            );
+                        }
                     }
+                    self.schedule_was_active = in_window;
 
+                    // Concurrency-blocked downloads: auto-start when a slot frees up
                     let auto_start = self.engine.auto_start_queued();
                     if !auto_start.is_empty() {
                         let engine = self.engine.clone();
@@ -436,17 +462,42 @@ impl Application for BoltApp {
                 Command::none()
             }
 
-            Message::ScheduleDownload(id, datetime) => {
-                self.engine.set_schedule(id, Some(datetime));
-                self.refresh_snapshots();
-                self.save_downloads();
+            Message::ToggleSchedule => {
+                self.settings.schedule_enabled = !self.settings.schedule_enabled;
+                self.settings.save();
                 Command::none()
             }
 
-            Message::ClearSchedule(id) => {
-                self.engine.set_schedule(id, None);
-                self.refresh_snapshots();
-                self.save_downloads();
+            Message::SetScheduleFromH(val) => {
+                self.sched_from_h = val.clone();
+                if let Ok(h) = val.parse::<u8>() {
+                    self.settings.schedule_from.0 = h.min(23);
+                    self.settings.save();
+                }
+                Command::none()
+            }
+            Message::SetScheduleFromM(val) => {
+                self.sched_from_m = val.clone();
+                if let Ok(m) = val.parse::<u8>() {
+                    self.settings.schedule_from.1 = m.min(59);
+                    self.settings.save();
+                }
+                Command::none()
+            }
+            Message::SetScheduleToH(val) => {
+                self.sched_to_h = val.clone();
+                if let Ok(h) = val.parse::<u8>() {
+                    self.settings.schedule_to.0 = h.min(23);
+                    self.settings.save();
+                }
+                Command::none()
+            }
+            Message::SetScheduleToM(val) => {
+                self.sched_to_m = val.clone();
+                if let Ok(m) = val.parse::<u8>() {
+                    self.settings.schedule_to.1 = m.min(59);
+                    self.settings.save();
+                }
                 Command::none()
             }
 
@@ -492,6 +543,10 @@ impl Application for BoltApp {
             &self.speed_limit_input,
             &self.max_concurrent_input,
             &self.search_query,
+            &self.sched_from_h,
+            &self.sched_from_m,
+            &self.sched_to_h,
+            &self.sched_to_m,
             &self.history,
             self.network_online,
         )
@@ -505,15 +560,13 @@ impl Application for BoltApp {
 
         let has_active = self.counts.1 > 0;
         let has_failed = self.counts.4 > 0;
-        let has_scheduled = self
-            .downloads
-            .iter()
-            .any(|d| d.scheduled_at.is_some() && d.status == crate::model::DownloadStatus::Queued);
         let has_tray = self.tray.is_some();
+        let has_scheduled_queued = self.settings.schedule_enabled
+            && self.downloads.iter().any(|d| d.status == DownloadStatus::Queued);
 
         let tick_sub = if has_active {
             iced::time::every(Duration::from_millis(250)).map(|_| Message::Tick)
-        } else if has_scheduled || has_tray || has_failed {
+        } else if has_tray || has_failed || has_scheduled_queued {
             iced::time::every(Duration::from_millis(500)).map(|_| Message::Tick)
         } else {
             Subscription::none()
@@ -630,3 +683,4 @@ fn open_path(path: &std::path::Path) -> std::io::Result<std::process::Child> {
         ))
     }
 }
+

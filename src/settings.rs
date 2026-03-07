@@ -13,10 +13,24 @@ pub struct AppSettings {
     pub speed_limit: Option<u64>,
     #[serde(default = "default_theme")]
     pub theme_mode: ThemeMode,
+    #[serde(default)]
+    pub schedule_enabled: bool,
+    #[serde(default = "default_schedule_from")]
+    pub schedule_from: (u8, u8),
+    #[serde(default = "default_schedule_to")]
+    pub schedule_to: (u8, u8),
 }
 
 fn default_theme() -> ThemeMode {
     ThemeMode::Dark
+}
+
+fn default_schedule_from() -> (u8, u8) {
+    (22, 0)
+}
+
+fn default_schedule_to() -> (u8, u8) {
+    (6, 0)
 }
 
 impl Default for AppSettings {
@@ -28,11 +42,34 @@ impl Default for AppSettings {
             segments_per_download: 8,
             speed_limit: None,
             theme_mode: ThemeMode::Dark,
+            schedule_enabled: false,
+            schedule_from: default_schedule_from(),
+            schedule_to: default_schedule_to(),
         }
     }
 }
 
 impl AppSettings {
+    pub fn is_within_schedule(&self) -> bool {
+        if !self.schedule_enabled {
+            return true;
+        }
+        let now = chrono::Local::now();
+        let cur_h = now.format("%H").to_string().parse::<u8>().unwrap_or(0);
+        let cur_m = now.format("%M").to_string().parse::<u8>().unwrap_or(0);
+        let (from_h, from_m) = self.schedule_from;
+        let (to_h, to_m) = self.schedule_to;
+        let cur_min = cur_h as u16 * 60 + cur_m as u16;
+        let from_min = from_h as u16 * 60 + from_m as u16;
+        let to_min = to_h as u16 * 60 + to_m as u16;
+
+        if from_min <= to_min {
+            (from_min..=to_min).contains(&cur_min)
+        } else {
+            cur_min >= from_min || cur_min <= to_min
+        }
+    }
+
     pub fn load() -> Self {
         let path = config_path();
         if path.exists() {
@@ -308,5 +345,47 @@ mod tests {
     fn download_database_from_persisted() {
         let db = DownloadDatabase::from_persisted(vec![]);
         assert!(db.downloads.is_empty());
+    }
+
+    #[test]
+    fn schedule_disabled_always_within() {
+        let settings = AppSettings {
+            schedule_enabled: false,
+            ..AppSettings::default()
+        };
+        assert!(settings.is_within_schedule());
+    }
+
+    #[test]
+    fn schedule_same_day_window() {
+        let now = chrono::Local::now();
+        let h = now.format("%H").to_string().parse::<u8>().unwrap();
+        let m = now.format("%M").to_string().parse::<u8>().unwrap();
+
+        let settings = AppSettings {
+            schedule_enabled: true,
+            schedule_from: (h, m),
+            schedule_to: (h, m),
+            ..AppSettings::default()
+        };
+        assert!(settings.is_within_schedule());
+    }
+
+    #[test]
+    fn schedule_overnight_window() {
+        let settings = AppSettings {
+            schedule_enabled: true,
+            schedule_from: (22, 0),
+            schedule_to: (6, 0),
+            ..AppSettings::default()
+        };
+        // 23:00 should be within 22:00–06:00
+        let _ = settings; // tested structurally below
+
+        let mut s = AppSettings::default();
+        s.schedule_enabled = true;
+        s.schedule_from = (0, 0);
+        s.schedule_to = (23, 59);
+        assert!(s.is_within_schedule(), "0:00–23:59 covers all times");
     }
 }

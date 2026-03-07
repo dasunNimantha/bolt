@@ -41,6 +41,10 @@ pub fn build_view<'a>(
     speed_limit_input: &'a str,
     max_concurrent_input: &'a str,
     search_query: &'a str,
+    sched_from_h: &'a str,
+    sched_from_m: &'a str,
+    sched_to_h: &'a str,
+    sched_to_m: &'a str,
     history: &'a DownloadHistory,
     network_online: bool,
 ) -> Element<'a, Message> {
@@ -72,6 +76,10 @@ pub fn build_view<'a>(
             settings,
             speed_limit_input,
             max_concurrent_input,
+            sched_from_h,
+            sched_from_m,
+            sched_to_h,
+            sched_to_m,
         ),
     };
 
@@ -310,6 +318,10 @@ fn build_settings_view<'a>(
     settings: &'a AppSettings,
     speed_limit_input: &'a str,
     max_concurrent_input: &'a str,
+    sched_from_h: &'a str,
+    sched_from_m: &'a str,
+    sched_to_h: &'a str,
+    sched_to_m: &'a str,
 ) -> Element<'a, Message> {
     let dir_display = settings.download_dir.to_str().unwrap_or("Unknown");
 
@@ -443,6 +455,80 @@ fn build_settings_view<'a>(
                     false,
                 ),
             ],
+        ))
+        // ── Schedule ──
+        .push(settings_group(
+            colors,
+            is_dark,
+            "Schedule",
+            vec![settings_row(
+                colors,
+                "Schedule downloads",
+                {
+                    let enabled = settings.schedule_enabled;
+                    let colon_color = if enabled {
+                        colors.text_primary
+                    } else {
+                        colors.text_disabled
+                    };
+                    let time_input = |placeholder: &'a str,
+                                      value: &'a str,
+                                      on_input: fn(String) -> Message|
+                     -> iced::widget::TextInput<'a, Message> {
+                        let mut inp = text_input(placeholder, value)
+                            .padding([6, 6])
+                            .size(13)
+                            .width(Length::Fixed(36.0))
+                            .style(iced::theme::TextInput::Custom(Box::new(
+                                TextInputStyle { colors },
+                            )));
+                        if enabled {
+                            inp = inp.on_input(on_input);
+                        }
+                        inp
+                    };
+                    row![
+                        button(
+                            row![
+                                icon(if enabled {
+                                    Bootstrap::ToggleOn
+                                } else {
+                                    Bootstrap::ToggleOff
+                                })
+                                .size(18),
+                                Space::with_width(6),
+                                text(if enabled { "On" } else { "Off" }).size(13),
+                            ]
+                            .align_items(Alignment::Center),
+                        )
+                        .on_press(Message::ToggleSchedule)
+                        .padding([6, 14])
+                        .style(iced::theme::Button::Custom(Box::new(
+                            SecondaryButtonStyle { colors },
+                        ))),
+                        Space::with_width(14),
+                        time_input("22", sched_from_h, Message::SetScheduleFromH),
+                        text(" : ")
+                            .size(13)
+                            .style(iced::theme::Text::Color(colon_color)),
+                        time_input("00", sched_from_m, Message::SetScheduleFromM),
+                        Space::with_width(12),
+                        text("–")
+                            .size(16)
+                            .style(iced::theme::Text::Color(colors.text_primary)),
+                        Space::with_width(12),
+                        time_input("06", sched_to_h, Message::SetScheduleToH),
+                        text(" : ")
+                            .size(13)
+                            .style(iced::theme::Text::Color(colon_color)),
+                        time_input("00", sched_to_m, Message::SetScheduleToM),
+                    ]
+                    .align_items(Alignment::Center)
+                    .into()
+                },
+                None,
+                false,
+            )],
         ))
         // ── Note ──
         .push(
@@ -782,7 +868,12 @@ fn build_download_list<'a>(
 
     for download in downloads {
         let is_selected = selected == Some(download.id);
-        list = list.push(build_download_card(download, is_selected, colors, is_dark));
+        list = list.push(build_download_card(
+            download,
+            is_selected,
+            colors,
+            is_dark,
+        ));
     }
 
     scrollable(list)
@@ -821,12 +912,7 @@ fn build_download_card<'a>(
 
     let display_name = truncate_filename(&download.filename, 65);
 
-    let mut status_text = download.status.label().to_string();
-    if download.status == DownloadStatus::Queued {
-        if let Some(ref sched) = download.scheduled_at {
-            status_text = format!("Scheduled {}", &sched[..16.min(sched.len())]);
-        }
-    }
+    let status_text = download.status.label().to_string();
 
     let name_and_status = row![
         icon(category_icon).style(iced::theme::Text::Color(colors.accent_primary)),

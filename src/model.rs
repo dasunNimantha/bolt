@@ -146,8 +146,6 @@ pub struct PersistedDownload {
     pub category: FileCategory,
     pub error: Option<String>,
     pub resumable: bool,
-    #[serde(default)]
-    pub scheduled_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,7 +173,6 @@ pub struct DownloadItem {
     pub category: FileCategory,
     pub error: Option<String>,
     pub resumable: bool,
-    pub scheduled_at: Option<String>,
 }
 
 impl DownloadItem {
@@ -370,7 +367,7 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
-            scheduled_at: None,
+
         };
         assert!((item.progress_percent() - 50.0).abs() < 0.01);
     }
@@ -390,7 +387,7 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
-            scheduled_at: None,
+
         };
         assert!((item.progress_percent() - 0.0).abs() < 0.01);
     }
@@ -410,7 +407,7 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
-            scheduled_at: None,
+
         };
         assert!((item.progress_percent() - 0.0).abs() < 0.01);
     }
@@ -430,7 +427,7 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
-            scheduled_at: None,
+
         };
         assert_eq!(item.eta_seconds(), Some(5));
     }
@@ -450,7 +447,7 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
-            scheduled_at: None,
+
         };
         assert_eq!(item.eta_seconds(), None);
     }
@@ -507,7 +504,6 @@ mod tests {
             category: FileCategory::Archive,
             error: None,
             resumable: true,
-            scheduled_at: Some("2030-01-01T12:00".to_string()),
         };
 
         let json = serde_json::to_string(&pd).unwrap();
@@ -519,45 +515,6 @@ mod tests {
         assert_eq!(restored.total_size, pd.total_size);
         assert_eq!(restored.segments.len(), 2);
         assert_eq!(restored.segments[0].downloaded, 256);
-        assert_eq!(restored.scheduled_at, Some("2030-01-01T12:00".to_string()));
-    }
-
-    #[test]
-    fn persisted_download_missing_scheduled_at() {
-        let json = r#"{
-            "id": "550e8400-e29b-41d4-a716-446655440000",
-            "url": "https://example.com/f",
-            "filename": "f",
-            "save_path": "/tmp/f",
-            "total_size": null,
-            "status": "Queued",
-            "segments": [],
-            "category": "Other",
-            "error": null,
-            "resumable": false
-        }"#;
-        let pd: PersistedDownload = serde_json::from_str(json).unwrap();
-        assert_eq!(pd.scheduled_at, None);
-    }
-
-    #[test]
-    fn download_item_with_schedule() {
-        let item = DownloadItem {
-            id: Uuid::new_v4(),
-            url: String::new(),
-            filename: String::new(),
-            save_path: PathBuf::new(),
-            total_size: Some(1000),
-            downloaded: 0,
-            status: DownloadStatus::Queued,
-            segments: vec![],
-            speed: 0.0,
-            category: FileCategory::Other,
-            error: None,
-            resumable: false,
-            scheduled_at: Some("2030-06-15T10:30".to_string()),
-        };
-        assert_eq!(item.scheduled_at, Some("2030-06-15T10:30".to_string()));
     }
 
     #[test]

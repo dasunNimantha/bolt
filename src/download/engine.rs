@@ -4,7 +4,7 @@ use crate::model::{
 };
 use crate::settings::DownloadDatabase;
 use anyhow::{anyhow, Result};
-use chrono::Local;
+
 use futures::FutureExt;
 use reqwest::header;
 use std::path::PathBuf;
@@ -36,7 +36,8 @@ struct ManagedDownload {
     cancel_flag: Arc<AtomicBool>,
     speed_tracker: SpeedTracker,
     task_handles: Vec<tokio::task::JoinHandle<Result<()>>>,
-    scheduled_at: Option<String>,
+    /// True when the user clicked Start but was blocked by concurrency limit.
+    awaiting_slot: bool,
 }
 
 pub struct DownloadEngine {
@@ -121,7 +122,7 @@ impl DownloadEngine {
                 cancel_flag: Arc::new(AtomicBool::new(false)),
                 speed_tracker: SpeedTracker::new(),
                 task_handles: Vec::new(),
-                scheduled_at: pd.scheduled_at.clone(),
+                awaiting_slot: false,
             });
         }
     }
@@ -159,7 +160,6 @@ impl DownloadEngine {
                     category: dl.category,
                     error: dl.error.clone(),
                     resumable: dl.resumable,
-                    scheduled_at: dl.scheduled_at.clone(),
                 }
             })
             .collect();
@@ -247,7 +247,6 @@ impl DownloadEngine {
             category,
             None,
             resumable,
-            None,
         );
 
         let managed = ManagedDownload {
@@ -265,7 +264,7 @@ impl DownloadEngine {
             cancel_flag,
             speed_tracker: SpeedTracker::new(),
             task_handles: Vec::new(),
-            scheduled_at: None,
+            awaiting_slot: false,
         };
 
         self.state.lock().unwrap().push(managed);
@@ -279,6 +278,9 @@ impl DownloadEngine {
             let active = self.count_downloading(&downloads);
             let max = self.max_concurrent.load(Ordering::Relaxed) as usize;
             if active >= max {
+                if let Some(dl) = downloads.iter_mut().find(|d| d.id == id) {
+                    dl.awaiting_slot = true;
+                }
                 return Err(anyhow!(
                     "Max concurrent downloads reached ({}). Wait for one to finish.",
                     max
@@ -296,6 +298,7 @@ impl DownloadEngine {
 
             dl.status = DownloadStatus::Downloading;
             dl.error = None;
+            dl.awaiting_slot = false;
 
             let seg_info: Vec<(u64, u64, Arc<AtomicU64>)> = dl
                 .segments
@@ -490,36 +493,7 @@ impl DownloadEngine {
         self.add_download(url, save_dir).await
     }
 
-    pub fn set_schedule(&self, id: Uuid, scheduled_at: Option<String>) {
-        let mut downloads = self.state.lock().unwrap();
-        if let Some(dl) = downloads.iter_mut().find(|d| d.id == id) {
-            dl.scheduled_at = scheduled_at;
-        }
-    }
-
-    /// Returns IDs of scheduled downloads that are due now.
-    pub fn check_scheduled(&self) -> Vec<Uuid> {
-        let downloads = self.state.lock().unwrap();
-        let now = Local::now();
-        let mut due = Vec::new();
-
-        for dl in downloads.iter() {
-            if dl.status != DownloadStatus::Queued {
-                continue;
-            }
-            if let Some(ref sched) = dl.scheduled_at {
-                if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(sched, "%Y-%m-%dT%H:%M") {
-                    if now.naive_local() >= dt {
-                        due.push(dl.id);
-                    }
-                }
-            }
-        }
-
-        due
-    }
-
-    /// Auto-start queued downloads if slots are available. Returns IDs that were auto-started.
+    /// Auto-start queued downloads that were blocked by concurrency limit.
     pub fn auto_start_queued(&self) -> Vec<Uuid> {
         let downloads = self.state.lock().unwrap();
         let active = self.count_downloading(&downloads);
@@ -532,7 +506,7 @@ impl DownloadEngine {
         let slots = max - active;
         downloads
             .iter()
-            .filter(|d| d.status == DownloadStatus::Queued && d.scheduled_at.is_none())
+            .filter(|d| d.status == DownloadStatus::Queued && d.awaiting_slot)
             .take(slots)
             .map(|d| d.id)
             .collect()
@@ -545,6 +519,23 @@ impl DownloadEngine {
             .filter(|d| d.status == DownloadStatus::Failed)
             .map(|d| d.id)
             .collect()
+    }
+
+    pub fn get_queued_ids(&self) -> Vec<Uuid> {
+        let downloads = self.state.lock().unwrap();
+        downloads
+            .iter()
+            .filter(|d| d.status == DownloadStatus::Queued)
+            .map(|d| d.id)
+            .collect()
+    }
+
+    #[cfg(test)]
+    pub fn mark_awaiting_slot(&self, id: Uuid) {
+        let mut downloads = self.state.lock().unwrap();
+        if let Some(dl) = downloads.iter_mut().find(|d| d.id == id) {
+            dl.awaiting_slot = true;
+        }
     }
 
     pub fn update_state(&self) {
@@ -603,7 +594,6 @@ impl DownloadEngine {
                     }
                 } else {
                     dl.status = DownloadStatus::Completed;
-                    dl.scheduled_at = None;
                 }
                 dl.speed_tracker.reset();
                 continue;
@@ -651,7 +641,6 @@ impl DownloadEngine {
                 dl.category,
                 dl.error.clone(),
                 dl.resumable,
-                dl.scheduled_at.clone(),
             ));
         }
 
@@ -783,7 +772,6 @@ fn build_snapshot(
     category: FileCategory,
     error: Option<String>,
     resumable: bool,
-    scheduled_at: Option<String>,
 ) -> DownloadItem {
     let raw_downloaded: u64 = segments
         .iter()
@@ -819,7 +807,6 @@ fn build_snapshot(
         category,
         error,
         resumable,
-        scheduled_at,
     }
 }
 
@@ -1057,7 +1044,7 @@ mod tests {
             category: FileCategory::Archive,
             error: None,
             resumable: true,
-            scheduled_at: None,
+
         }]);
 
         let engine = DownloadEngine::new();
@@ -1096,7 +1083,7 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: true,
-            scheduled_at: None,
+
         }]);
 
         let engine = DownloadEngine::new();
@@ -1104,108 +1091,6 @@ mod tests {
 
         let (snapshots, _, _) = engine.get_ui_state();
         assert_eq!(snapshots[0].status, DownloadStatus::Paused);
-    }
-
-    #[test]
-    fn engine_set_schedule() {
-        use crate::model::{PersistedDownload, PersistedSegment};
-        use crate::settings::DownloadDatabase;
-
-        let id = Uuid::new_v4();
-        let db = DownloadDatabase::from_persisted(vec![PersistedDownload {
-            id,
-            url: "https://example.com/f.bin".to_string(),
-            filename: "f.bin".to_string(),
-            save_path: PathBuf::from("/tmp/f.bin"),
-            total_size: Some(1024),
-            status: DownloadStatus::Queued,
-            segments: vec![PersistedSegment {
-                start: 0,
-                end: 1024,
-                downloaded: 0,
-            }],
-            category: FileCategory::Other,
-            error: None,
-            resumable: true,
-            scheduled_at: None,
-        }]);
-
-        let engine = DownloadEngine::new();
-        engine.restore_downloads(&db);
-
-        engine.set_schedule(id, Some("2030-01-01T00:00".to_string()));
-        let (snapshots, _, _) = engine.get_ui_state();
-        assert_eq!(
-            snapshots[0].scheduled_at,
-            Some("2030-01-01T00:00".to_string())
-        );
-
-        engine.set_schedule(id, None);
-        let (snapshots, _, _) = engine.get_ui_state();
-        assert_eq!(snapshots[0].scheduled_at, None);
-    }
-
-    #[test]
-    fn engine_check_scheduled_not_due() {
-        use crate::model::{PersistedDownload, PersistedSegment};
-        use crate::settings::DownloadDatabase;
-
-        let id = Uuid::new_v4();
-        let db = DownloadDatabase::from_persisted(vec![PersistedDownload {
-            id,
-            url: "https://example.com/f.bin".to_string(),
-            filename: "f.bin".to_string(),
-            save_path: PathBuf::from("/tmp/f.bin"),
-            total_size: Some(1024),
-            status: DownloadStatus::Queued,
-            segments: vec![PersistedSegment {
-                start: 0,
-                end: 1024,
-                downloaded: 0,
-            }],
-            category: FileCategory::Other,
-            error: None,
-            resumable: true,
-            scheduled_at: Some("2030-12-31T23:59".to_string()),
-        }]);
-
-        let engine = DownloadEngine::new();
-        engine.restore_downloads(&db);
-
-        let due = engine.check_scheduled();
-        assert!(due.is_empty());
-    }
-
-    #[test]
-    fn engine_check_scheduled_past_due() {
-        use crate::model::{PersistedDownload, PersistedSegment};
-        use crate::settings::DownloadDatabase;
-
-        let id = Uuid::new_v4();
-        let db = DownloadDatabase::from_persisted(vec![PersistedDownload {
-            id,
-            url: "https://example.com/f.bin".to_string(),
-            filename: "f.bin".to_string(),
-            save_path: PathBuf::from("/tmp/f.bin"),
-            total_size: Some(1024),
-            status: DownloadStatus::Queued,
-            segments: vec![PersistedSegment {
-                start: 0,
-                end: 1024,
-                downloaded: 0,
-            }],
-            category: FileCategory::Other,
-            error: None,
-            resumable: true,
-            scheduled_at: Some("2020-01-01T00:00".to_string()),
-        }]);
-
-        let engine = DownloadEngine::new();
-        engine.restore_downloads(&db);
-
-        let due = engine.check_scheduled();
-        assert_eq!(due.len(), 1);
-        assert_eq!(due[0], id);
     }
 
     #[test]
@@ -1231,7 +1116,7 @@ mod tests {
                 category: FileCategory::Other,
                 error: None,
                 resumable: false,
-                scheduled_at: None,
+    
             },
             PersistedDownload {
                 id: id2,
@@ -1248,7 +1133,7 @@ mod tests {
                 category: FileCategory::Other,
                 error: None,
                 resumable: false,
-                scheduled_at: None,
+    
             },
         ]);
 
@@ -1256,12 +1141,16 @@ mod tests {
         engine.set_max_concurrent(1);
         engine.restore_downloads(&db);
 
+        // Downloads must have awaiting_slot=true (user tried to start them)
+        engine.mark_awaiting_slot(id1);
+        engine.mark_awaiting_slot(id2);
+
         let auto = engine.auto_start_queued();
         assert_eq!(auto.len(), 1);
     }
 
     #[test]
-    fn engine_auto_start_skips_scheduled() {
+    fn engine_auto_start_skips_fresh_queued() {
         use crate::model::{PersistedDownload, PersistedSegment};
         use crate::settings::DownloadDatabase;
 
@@ -1280,14 +1169,14 @@ mod tests {
             category: FileCategory::Other,
             error: None,
             resumable: false,
-            scheduled_at: Some("2030-01-01T00:00".to_string()),
+
         }]);
 
         let engine = DownloadEngine::new();
         engine.restore_downloads(&db);
 
         let auto = engine.auto_start_queued();
-        assert!(auto.is_empty());
+        assert!(auto.is_empty(), "fresh queued downloads should not auto-start");
     }
 
     #[test]
@@ -1313,7 +1202,7 @@ mod tests {
                 category: FileCategory::Other,
                 error: Some("timeout".to_string()),
                 resumable: true,
-                scheduled_at: None,
+    
             },
             PersistedDownload {
                 id: id_paused,
@@ -1330,7 +1219,7 @@ mod tests {
                 category: FileCategory::Other,
                 error: None,
                 resumable: true,
-                scheduled_at: None,
+    
             },
         ]);
 

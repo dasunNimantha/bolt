@@ -40,9 +40,12 @@ pub enum Message {
     SetSpeedLimit(String),
     ClearSpeedLimit,
 
-    // Scheduling
-    ScheduleDownload(Uuid, String),
-    ClearSchedule(Uuid),
+    // Schedule window
+    ToggleSchedule,
+    SetScheduleFromH(String),
+    SetScheduleFromM(String),
+    SetScheduleToH(String),
+    SetScheduleToM(String),
 
     // Network / auto-resume
     NetworkStatus(bool),
