@@ -11,9 +11,14 @@ Fast multi-threaded download manager for Linux, Windows and macOS. Built with Ru
 - **System tray & background mode** -- minimizes to tray on close; live tooltip with speed/status
 - **Auto-resume on reconnect** -- detects network recovery and retries failed downloads automatically
 - **Search & history** -- filter downloads by name or URL; completed downloads are tracked in persistent history
+- **Batch downloads** -- paste multiple URLs or import from a text file to queue downloads in bulk
 - **Smart queue management** -- auto-start queued downloads when slots open, auto-retry failed segments
 - **Dark / Light theme** -- toggle between themes in a grouped, card-based settings page
 - **Cross-platform** -- runs on Linux, Windows and macOS with native file dialogs and file-type detection
+
+### Coming soon
+
+- **Proxy support** -- HTTP, HTTPS and SOCKS5 proxy with authentication and connection testing (implemented, UI hidden pending stabilization)
 
 ## Building
 

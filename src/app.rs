@@ -1,7 +1,7 @@
 use crate::download::engine::DownloadEngine;
 use crate::message::Message;
 use crate::model::{DownloadFilter, DownloadItem, DownloadStatus, HistoryEntry, ViewMode};
-use crate::settings::{AppSettings, DownloadDatabase, DownloadHistory};
+use crate::settings::{AppSettings, DownloadDatabase, DownloadHistory, ProxyType};
 use crate::theme::{bolt_theme, ThemeMode};
 use crate::tray::BoltTray;
 use crate::utils::format::format_speed;
@@ -33,6 +33,13 @@ pub struct BoltApp {
     sched_from_m: String,
     sched_to_h: String,
     sched_to_m: String,
+    proxy_host: String,
+    proxy_port: String,
+    proxy_user: String,
+    proxy_pass: String,
+    proxy_testing: bool,
+    proxy_test_result: Option<Result<String, String>>,
+    batch_status: Option<String>,
     persist_counter: u32,
     tray: Option<BoltTray>,
     network_online: bool,
@@ -72,6 +79,15 @@ impl Application for BoltApp {
         let sched_to_h = format!("{:02}", settings.schedule_to.0);
         let sched_to_m = format!("{:02}", settings.schedule_to.1);
 
+        if let Some(proxy_url) = settings.proxy.to_url() {
+            engine.set_proxy(Some(&proxy_url));
+        }
+
+        let proxy_host = settings.proxy.host.clone();
+        let proxy_port = settings.proxy.port.clone();
+        let proxy_user = settings.proxy.username.clone();
+        let proxy_pass = settings.proxy.password.clone();
+
         let tray = BoltTray::new();
         let history = DownloadHistory::load();
         let schedule_was_active = settings.schedule_enabled && settings.is_within_schedule();
@@ -95,6 +111,13 @@ impl Application for BoltApp {
             sched_from_m,
             sched_to_h,
             sched_to_m,
+            proxy_host,
+            proxy_port,
+            proxy_user,
+            proxy_pass,
+            proxy_testing: false,
+            proxy_test_result: None,
+            batch_status: None,
             persist_counter: 0,
             tray,
             network_online: true,
@@ -131,17 +154,27 @@ impl Application for BoltApp {
             }
 
             Message::AddDownload => {
-                let mut url = self.url_input.trim().to_string();
-                if url.is_empty() {
+                let raw = self.url_input.trim().to_string();
+                if raw.is_empty() {
                     return Command::none();
                 }
 
-                if !url.starts_with("http://") && !url.starts_with("https://") {
-                    url = format!("https://{}", url);
-                }
+                let urls: Vec<String> = raw
+                    .lines()
+                    .map(|l| l.trim().to_string())
+                    .filter(|l| !l.is_empty())
+                    .map(|u| {
+                        if !u.starts_with("http://") && !u.starts_with("https://") {
+                            format!("https://{}", u)
+                        } else {
+                            u
+                        }
+                    })
+                    .filter(|u| url::Url::parse(u).is_ok())
+                    .collect();
 
-                if url::Url::parse(&url).is_err() {
-                    self.error_message = Some("Invalid URL".to_string());
+                if urls.is_empty() {
+                    self.error_message = Some("No valid URLs found".to_string());
                     return Command::none();
                 }
 
@@ -151,15 +184,32 @@ impl Application for BoltApp {
                 let engine = self.engine.clone();
                 let save_dir = self.settings.download_dir.clone();
 
-                Command::perform(
-                    async move {
-                        match engine.add_download(url, save_dir).await {
-                            Ok(item) => Message::DownloadAdded(Box::new(item)),
-                            Err(e) => Message::DownloadError(e.to_string()),
-                        }
-                    },
-                    |msg| msg,
-                )
+                if urls.len() == 1 {
+                    let url = urls.into_iter().next().unwrap();
+                    Command::perform(
+                        async move {
+                            match engine.add_download(url, save_dir).await {
+                                Ok(item) => Message::DownloadAdded(Box::new(item)),
+                                Err(e) => Message::DownloadError(e.to_string()),
+                            }
+                        },
+                        |msg| msg,
+                    )
+                } else {
+                    Command::perform(
+                        async move {
+                            let total = urls.len();
+                            let mut ok = 0usize;
+                            for url in urls {
+                                if engine.add_download(url, save_dir.clone()).await.is_ok() {
+                                    ok += 1;
+                                }
+                            }
+                            Message::BatchAddResult(ok, total)
+                        },
+                        |msg| msg,
+                    )
+                }
             }
 
             Message::DownloadAdded(_item) => {
@@ -527,6 +577,209 @@ impl Application for BoltApp {
                 window::close(window::Id::MAIN)
             }
 
+            Message::ImportFile => Command::perform(
+                async {
+                    let handle = rfd::AsyncFileDialog::new()
+                        .set_title("Import URLs from text file")
+                        .add_filter("Text files", &["txt"])
+                        .pick_file()
+                        .await;
+                    Message::ImportFileChosen(handle.map(|h| h.path().to_path_buf()))
+                },
+                |msg| msg,
+            ),
+
+            Message::ImportFileChosen(path) => {
+                if let Some(file_path) = path {
+                    if let Ok(contents) = std::fs::read_to_string(&file_path) {
+                        let urls: Vec<String> = contents
+                            .lines()
+                            .map(|l| l.trim().to_string())
+                            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                            .map(|u| {
+                                if !u.starts_with("http://") && !u.starts_with("https://") {
+                                    format!("https://{}", u)
+                                } else {
+                                    u
+                                }
+                            })
+                            .filter(|u| url::Url::parse(u).is_ok())
+                            .collect();
+
+                        if urls.is_empty() {
+                            self.error_message = Some("No valid URLs found in file".to_string());
+                            return Command::none();
+                        }
+
+                        self.adding = true;
+                        let engine = self.engine.clone();
+                        let save_dir = self.settings.download_dir.clone();
+
+                        return Command::perform(
+                            async move {
+                                let total = urls.len();
+                                let mut ok = 0usize;
+                                for url in urls {
+                                    if engine.add_download(url, save_dir.clone()).await.is_ok() {
+                                        ok += 1;
+                                    }
+                                }
+                                Message::BatchAddResult(ok, total)
+                            },
+                            |msg| msg,
+                        );
+                    }
+                    self.error_message = Some("Could not read file".to_string());
+                }
+                Command::none()
+            }
+
+            Message::BatchAddResult(ok, total) => {
+                self.adding = false;
+                let failed = total - ok;
+                if failed > 0 {
+                    self.error_message = Some(format!(
+                        "Added {} of {} URLs ({} failed)",
+                        ok, total, failed
+                    ));
+                } else {
+                    self.error_message = None;
+                    self.batch_status = Some(format!("Added {} downloads", ok));
+                }
+                self.refresh_snapshots();
+                self.save_downloads();
+                Command::none()
+            }
+
+            Message::SetProxyType(pt) => {
+                self.settings.proxy.proxy_type = pt;
+                self.proxy_test_result = None;
+                if pt == ProxyType::None {
+                    self.engine.set_proxy(None);
+                } else {
+                    self.apply_proxy();
+                }
+                self.settings.save();
+                Command::none()
+            }
+
+            Message::SetProxyHost(val) => {
+                self.proxy_host = val;
+                self.settings.proxy.host = self.proxy_host.clone();
+                self.proxy_test_result = None;
+                self.apply_proxy();
+                self.settings.save();
+                Command::none()
+            }
+
+            Message::SetProxyPort(val) => {
+                self.proxy_port = val;
+                self.settings.proxy.port = self.proxy_port.clone();
+                self.proxy_test_result = None;
+                self.apply_proxy();
+                self.settings.save();
+                Command::none()
+            }
+
+            Message::SetProxyUser(val) => {
+                self.proxy_user = val;
+                self.settings.proxy.username = self.proxy_user.clone();
+                self.proxy_test_result = None;
+                self.apply_proxy();
+                self.settings.save();
+                Command::none()
+            }
+
+            Message::SetProxyPass(val) => {
+                self.proxy_pass = val;
+                self.settings.proxy.password = self.proxy_pass.clone();
+                self.proxy_test_result = None;
+                self.apply_proxy();
+                self.settings.save();
+                Command::none()
+            }
+
+            Message::TestProxy => {
+                if !self.settings.proxy.is_active() {
+                    self.proxy_test_result = Some(Err("Configure proxy host first".to_string()));
+                    return Command::none();
+                }
+                self.proxy_testing = true;
+                self.proxy_test_result = None;
+                let proxy_url = self.settings.proxy.to_url().unwrap();
+                Command::perform(
+                    async move {
+                        let proxy = match reqwest::Proxy::all(&proxy_url) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                return Message::ProxyTestResult(Err(format!(
+                                    "Invalid proxy URL: {}",
+                                    e
+                                )));
+                            }
+                        };
+                        let client = match reqwest::Client::builder()
+                            .proxy(proxy)
+                            .timeout(Duration::from_secs(10))
+                            .build()
+                        {
+                            Ok(c) => c,
+                            Err(e) => {
+                                return Message::ProxyTestResult(Err(format!(
+                                    "Client error: {}",
+                                    e
+                                )));
+                            }
+                        };
+                        match client
+                            .get("http://ip-api.com/json/?fields=country")
+                            .send()
+                            .await
+                        {
+                            Ok(resp) if resp.status().is_success() => {
+                                match resp.json::<serde_json::Value>().await {
+                                    Ok(json) => {
+                                        let country = json["country"]
+                                            .as_str()
+                                            .unwrap_or("Unknown")
+                                            .to_string();
+                                        Message::ProxyTestResult(Ok(country))
+                                    }
+                                    Err(e) => Message::ProxyTestResult(Err(format!(
+                                        "Failed to parse response: {}",
+                                        e
+                                    ))),
+                                }
+                            }
+                            Ok(resp) => {
+                                Message::ProxyTestResult(Err(format!("HTTP {}", resp.status())))
+                            }
+                            Err(e) => {
+                                let msg = e.to_string();
+                                let short = if let Some(pos) = msg.find("error trying to connect") {
+                                    let rest = &msg[pos..];
+                                    if let Some(colon) = rest.rfind(": ") {
+                                        format!("Connection failed: {}", &rest[colon + 2..])
+                                    } else {
+                                        format!("Connection failed: {}", rest)
+                                    }
+                                } else {
+                                    format!("Connection failed: {}", msg)
+                                };
+                                Message::ProxyTestResult(Err(short))
+                            }
+                        }
+                    },
+                    |msg| msg,
+                )
+            }
+
+            Message::ProxyTestResult(result) => {
+                self.proxy_testing = false;
+                self.proxy_test_result = Some(result);
+                Command::none()
+            }
+
             Message::Noop => Command::none(),
         }
     }
@@ -552,6 +805,12 @@ impl Application for BoltApp {
             &self.sched_from_m,
             &self.sched_to_h,
             &self.sched_to_m,
+            &self.proxy_host,
+            &self.proxy_port,
+            &self.proxy_user,
+            &self.proxy_pass,
+            self.proxy_testing,
+            self.proxy_test_result.as_ref(),
             &self.history,
             self.network_online,
         )
@@ -640,6 +899,14 @@ impl BoltApp {
         }
         if changed {
             self.history.save();
+        }
+    }
+
+    fn apply_proxy(&self) {
+        if let Some(url) = self.settings.proxy.to_url() {
+            self.engine.set_proxy(Some(&url));
+        } else {
+            self.engine.set_proxy(None);
         }
     }
 

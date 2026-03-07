@@ -665,14 +665,14 @@ impl iced::widget::scrollable::StyleSheet for ScrollableStyle {
         iced::widget::scrollable::Appearance {
             container: iced::widget::container::Appearance::default(),
             scrollbar: iced::widget::scrollable::Scrollbar {
-                background: Some(iced::Background::Color(Color::TRANSPARENT)),
+                background: None,
                 border: iced::Border::default(),
                 scroller: iced::widget::scrollable::Scroller {
-                    color: self.colors.bg_tertiary,
+                    color: Color::TRANSPARENT,
                     border: iced::Border {
                         color: Color::TRANSPARENT,
                         width: 0.0,
-                        radius: 4.0.into(),
+                        radius: 3.0.into(),
                     },
                 },
             },
@@ -688,14 +688,14 @@ impl iced::widget::scrollable::StyleSheet for ScrollableStyle {
         iced::widget::scrollable::Appearance {
             container: iced::widget::container::Appearance::default(),
             scrollbar: iced::widget::scrollable::Scrollbar {
-                background: Some(iced::Background::Color(Color::TRANSPARENT)),
+                background: None,
                 border: iced::Border::default(),
                 scroller: iced::widget::scrollable::Scroller {
-                    color: self.colors.border,
+                    color: Color::TRANSPARENT,
                     border: iced::Border {
                         color: Color::TRANSPARENT,
                         width: 0.0,
-                        radius: 4.0.into(),
+                        radius: 3.0.into(),
                     },
                 },
             },

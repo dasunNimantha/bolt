@@ -42,7 +42,7 @@ struct ManagedDownload {
 
 pub struct DownloadEngine {
     state: Mutex<Vec<ManagedDownload>>,
-    client: reqwest::Client,
+    client: Mutex<reqwest::Client>,
     speed_limit: AtomicU64,
     max_concurrent: AtomicU64,
 }
@@ -55,22 +55,40 @@ impl Default for DownloadEngine {
 
 impl DownloadEngine {
     pub fn new() -> Self {
-        let client = reqwest::Client::builder()
+        let client = Self::build_client(None);
+
+        Self {
+            state: Mutex::new(Vec::new()),
+            client: Mutex::new(client),
+            speed_limit: AtomicU64::new(0),
+            max_concurrent: AtomicU64::new(3),
+        }
+    }
+
+    fn build_client(proxy_url: Option<&str>) -> reqwest::Client {
+        let mut builder = reqwest::Client::builder()
             .user_agent("Bolt/0.1.0")
             .pool_max_idle_per_host(16)
             .pool_idle_timeout(Duration::from_secs(90))
             .tcp_nodelay(true)
             .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(3600))
-            .build()
-            .expect("Failed to build HTTP client");
+            .timeout(Duration::from_secs(3600));
 
-        Self {
-            state: Mutex::new(Vec::new()),
-            client,
-            speed_limit: AtomicU64::new(0),
-            max_concurrent: AtomicU64::new(3),
+        if let Some(url) = proxy_url {
+            if !url.is_empty() {
+                if let Ok(proxy) = reqwest::Proxy::all(url) {
+                    builder = builder.proxy(proxy);
+                }
+            }
         }
+
+        builder.build().expect("Failed to build HTTP client")
+    }
+
+    pub fn set_proxy(&self, proxy_url: Option<&str>) {
+        let new_client = Self::build_client(proxy_url);
+        let mut client = self.client.lock().unwrap();
+        *client = new_client;
     }
 
     pub fn set_speed_limit(&self, bps: u64) {
@@ -187,9 +205,10 @@ impl DownloadEngine {
         url: String,
         save_dir: PathBuf,
     ) -> Result<DownloadItem> {
-        let response = match self.client.head(&url).send().await {
+        let client = self.client.lock().unwrap().clone();
+        let response = match client.head(&url).send().await {
             Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => resp,
-            _ => self.client.get(&url).send().await?,
+            _ => client.get(&url).send().await?,
         };
 
         if !response.status().is_success()
@@ -331,10 +350,11 @@ impl DownloadEngine {
 
         let seg_limit = self.per_segment_limit(num_segments);
 
+        let client = self.client.lock().unwrap().clone();
         let mut task_handles = Vec::new();
         for (start, end, downloaded) in segments_info {
             let handle = tokio::spawn(download_segment(
-                self.client.clone(),
+                client.clone(),
                 url.clone(),
                 save_path.clone(),
                 start,
@@ -416,6 +436,7 @@ impl DownloadEngine {
 
         let seg_limit = self.per_segment_limit(num_segments);
 
+        let client = self.client.lock().unwrap().clone();
         let mut new_handles = Vec::new();
         for (start, end, downloaded) in segments_info {
             let done = downloaded.load(Ordering::Relaxed);
@@ -424,7 +445,7 @@ impl DownloadEngine {
             }
 
             let handle = tokio::spawn(download_segment(
-                self.client.clone(),
+                client.clone(),
                 url.clone(),
                 save_path.clone(),
                 start,

@@ -1,4 +1,5 @@
 use crate::model::{DownloadFilter, DownloadItem};
+use crate::settings::ProxyType;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -33,12 +34,24 @@ pub enum Message {
     // Search
     SearchChanged(String),
 
+    // Batch
+    ImportFile,
+    ImportFileChosen(Option<std::path::PathBuf>),
+    BatchAddResult(usize, usize),
+
     // Settings
     ChooseDownloadDir,
     DownloadDirChosen(Option<std::path::PathBuf>),
     SetMaxConcurrent(String),
     SetSpeedLimit(String),
     ClearSpeedLimit,
+    SetProxyType(ProxyType),
+    SetProxyHost(String),
+    SetProxyPort(String),
+    SetProxyUser(String),
+    SetProxyPass(String),
+    TestProxy,
+    ProxyTestResult(Result<String, String>),
 
     // Schedule window
     ToggleSchedule,

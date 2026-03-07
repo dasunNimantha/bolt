@@ -1,9 +1,94 @@
 use chrono::Timelike;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::path::PathBuf;
 
 use crate::model::{HistoryEntry, PersistedDownload};
 use crate::theme::ThemeMode;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ProxyType {
+    #[default]
+    None,
+    Http,
+    Https,
+    Socks5,
+}
+
+impl ProxyType {
+    pub const ALL: [ProxyType; 4] = [
+        ProxyType::None,
+        ProxyType::Http,
+        ProxyType::Https,
+        ProxyType::Socks5,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ProxyType::None => "None",
+            ProxyType::Http => "HTTP",
+            ProxyType::Https => "HTTPS",
+            ProxyType::Socks5 => "SOCKS5",
+        }
+    }
+
+    pub fn scheme(self) -> &'static str {
+        match self {
+            ProxyType::None => "",
+            ProxyType::Http => "http",
+            ProxyType::Https => "https",
+            ProxyType::Socks5 => "socks5h",
+        }
+    }
+}
+
+impl fmt::Display for ProxyType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProxyConfig {
+    #[serde(default)]
+    pub proxy_type: ProxyType,
+    #[serde(default)]
+    pub host: String,
+    #[serde(default)]
+    pub port: String,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+}
+
+impl ProxyConfig {
+    pub fn to_url(&self) -> Option<String> {
+        if self.proxy_type == ProxyType::None || self.host.is_empty() {
+            return None;
+        }
+        let scheme = self.proxy_type.scheme();
+        let host_port = if self.port.is_empty() {
+            self.host.clone()
+        } else {
+            format!("{}:{}", self.host, self.port)
+        };
+        if !self.username.is_empty() {
+            let auth = if self.password.is_empty() {
+                self.username.clone()
+            } else {
+                format!("{}:{}", self.username, self.password)
+            };
+            Some(format!("{}://{}@{}", scheme, auth, host_port))
+        } else {
+            Some(format!("{}://{}", scheme, host_port))
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.proxy_type != ProxyType::None && !self.host.is_empty()
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -20,6 +105,8 @@ pub struct AppSettings {
     pub schedule_from: (u8, u8),
     #[serde(default = "default_schedule_to")]
     pub schedule_to: (u8, u8),
+    #[serde(default)]
+    pub proxy: ProxyConfig,
 }
 
 fn default_theme() -> ThemeMode {
@@ -46,6 +133,7 @@ impl Default for AppSettings {
             schedule_enabled: false,
             schedule_from: default_schedule_from(),
             schedule_to: default_schedule_to(),
+            proxy: ProxyConfig::default(),
         }
     }
 }

@@ -1,6 +1,6 @@
 use crate::message::Message;
 use crate::model::{DownloadFilter, DownloadItem, DownloadStatus, FileCategory, ViewMode};
-use crate::settings::{AppSettings, DownloadHistory};
+use crate::settings::{AppSettings, DownloadHistory, ProxyType};
 use crate::theme::{
     get_colors, CardStyle, ColorScheme, DangerButtonStyle, DownloadCardStyle, FilterButtonStyle,
     IconButtonStyle, PanelStyle, PrimaryButtonStyle, ProgressBarCompleteStyle,
@@ -45,6 +45,12 @@ pub fn build_view<'a>(
     sched_from_m: &'a str,
     sched_to_h: &'a str,
     sched_to_m: &'a str,
+    proxy_host: &'a str,
+    proxy_port: &'a str,
+    proxy_user: &'a str,
+    proxy_pass: &'a str,
+    proxy_testing: bool,
+    proxy_test_result: Option<&'a Result<String, String>>,
     history: &'a DownloadHistory,
     network_online: bool,
 ) -> Element<'a, Message> {
@@ -80,6 +86,12 @@ pub fn build_view<'a>(
             sched_from_m,
             sched_to_h,
             sched_to_m,
+            proxy_host,
+            proxy_port,
+            proxy_user,
+            proxy_pass,
+            proxy_testing,
+            proxy_test_result,
         ),
     };
 
@@ -312,6 +324,7 @@ fn build_downloads_view<'a>(
     content.into()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_settings_view<'a>(
     colors: ColorScheme,
     is_dark: bool,
@@ -322,6 +335,12 @@ fn build_settings_view<'a>(
     sched_from_m: &'a str,
     sched_to_h: &'a str,
     sched_to_m: &'a str,
+    _proxy_host: &'a str,
+    _proxy_port: &'a str,
+    _proxy_user: &'a str,
+    _proxy_pass: &'a str,
+    _proxy_testing: bool,
+    _proxy_test_result: Option<&'a Result<String, String>>,
 ) -> Element<'a, Message> {
     let dir_display = settings.download_dir.to_str().unwrap_or("Unknown");
 
@@ -333,10 +352,9 @@ fn build_settings_view<'a>(
         "Invalid value".to_string()
     };
 
-    let content = Column::new()
+    let sections = Column::new()
         .spacing(20)
         .width(Length::Fill)
-        .height(Length::Fill)
         // ── General ──
         .push(settings_group(
             colors,
@@ -546,8 +564,19 @@ fn build_settings_view<'a>(
                 false,
             )],
         ))
+        // ── Network / Proxy (disabled — coming soon) ──
+        // .push(build_proxy_settings(
+        //     colors,
+        //     is_dark,
+        //     settings,
+        //     proxy_host,
+        //     proxy_port,
+        //     proxy_user,
+        //     proxy_pass,
+        //     proxy_testing,
+        //     proxy_test_result,
+        // ))
         // ── About ──
-        .push(Space::with_height(Length::Fill))
         .push(
             container(
                 row![
@@ -572,7 +601,214 @@ fn build_settings_view<'a>(
             .padding([8, 4]),
         );
 
-    content.into()
+    scrollable(sections)
+        .height(Length::Fill)
+        .style(iced::theme::Scrollable::Custom(Box::new(ScrollableStyle {
+            colors,
+        })))
+        .into()
+}
+
+#[allow(dead_code, clippy::too_many_arguments)]
+fn build_proxy_settings<'a>(
+    colors: ColorScheme,
+    is_dark: bool,
+    settings: &'a AppSettings,
+    proxy_host: &'a str,
+    proxy_port: &'a str,
+    proxy_user: &'a str,
+    proxy_pass: &'a str,
+    proxy_testing: bool,
+    proxy_test_result: Option<&'a Result<String, String>>,
+) -> Element<'a, Message> {
+    let active_type = settings.proxy.proxy_type;
+    let has_proxy = active_type != ProxyType::None;
+
+    let type_selector = {
+        let mut r = Row::new().spacing(4).align_items(Alignment::Center);
+        for pt in ProxyType::ALL {
+            let is_selected = pt == active_type;
+            let btn = button(text(pt.label()).size(12).style(iced::theme::Text::Color(
+                if is_selected {
+                    Color::from_rgb(0.1, 0.1, 0.1)
+                } else {
+                    colors.text_secondary
+                },
+            )))
+            .on_press(Message::SetProxyType(pt))
+            .padding([5, 12])
+            .style(if is_selected {
+                iced::theme::Button::Custom(Box::new(PrimaryButtonStyle { colors }))
+            } else {
+                iced::theme::Button::Custom(Box::new(SecondaryButtonStyle { colors }))
+            });
+            r = r.push(btn);
+        }
+        r
+    };
+
+    let status_text = if settings.proxy.is_active() {
+        format!(
+            "{} via {}:{}",
+            active_type.label(),
+            proxy_host,
+            if proxy_port.is_empty() {
+                "—"
+            } else {
+                proxy_port
+            }
+        )
+    } else if has_proxy {
+        "Host required".to_string()
+    } else {
+        "Direct connection".to_string()
+    };
+
+    let mut rows: Vec<Element<'a, Message>> = vec![settings_row(
+        colors,
+        "Proxy type",
+        type_selector.into(),
+        Some(status_text),
+        true,
+    )];
+
+    if has_proxy {
+        let fs =
+            |c: ColorScheme| iced::theme::TextInput::Custom(Box::new(TextInputStyle { colors: c }));
+
+        // Host : Port
+        rows.push(settings_row(
+            colors,
+            "Server",
+            row![
+                text_input("Host", proxy_host)
+                    .on_input(Message::SetProxyHost)
+                    .padding([6, 10])
+                    .size(13)
+                    .width(Length::Fixed(150.0))
+                    .style(fs(colors)),
+                Space::with_width(6),
+                text(":")
+                    .size(13)
+                    .style(iced::theme::Text::Color(colors.text_disabled)),
+                Space::with_width(6),
+                text_input("Port", proxy_port)
+                    .on_input(Message::SetProxyPort)
+                    .padding([6, 10])
+                    .size(13)
+                    .width(Length::Fixed(70.0))
+                    .style(fs(colors)),
+            ]
+            .align_items(Alignment::Center)
+            .into(),
+            None,
+            true,
+        ));
+
+        // Username / Password
+        rows.push(settings_row(
+            colors,
+            "Auth",
+            row![
+                text_input("Username", proxy_user)
+                    .on_input(Message::SetProxyUser)
+                    .padding([6, 10])
+                    .size(13)
+                    .width(Length::Fixed(120.0))
+                    .style(fs(colors)),
+                Space::with_width(8),
+                text_input("Password", proxy_pass)
+                    .on_input(Message::SetProxyPass)
+                    .padding([6, 10])
+                    .size(13)
+                    .width(Length::Fixed(120.0))
+                    .style(fs(colors))
+                    .secure(true),
+            ]
+            .align_items(Alignment::Center)
+            .into(),
+            Some("Optional".to_string()),
+            true,
+        ));
+
+        // Test connection
+        let test_btn: Element<'a, Message> = if proxy_testing {
+            button(
+                row![
+                    icon(Bootstrap::ArrowRepeat).size(14),
+                    Space::with_width(5),
+                    text("Testing...").size(13),
+                ]
+                .align_items(Alignment::Center),
+            )
+            .padding([5, 12])
+            .style(iced::theme::Button::Custom(Box::new(
+                SecondaryButtonStyle { colors },
+            )))
+            .into()
+        } else {
+            button(
+                row![
+                    icon(Bootstrap::Wifi).size(14),
+                    Space::with_width(5),
+                    text("Test Connection").size(13),
+                ]
+                .align_items(Alignment::Center),
+            )
+            .on_press(Message::TestProxy)
+            .padding([5, 12])
+            .style(iced::theme::Button::Custom(Box::new(
+                SecondaryButtonStyle { colors },
+            )))
+            .into()
+        };
+
+        let test_row: Element<'a, Message> = if let Some(result) = proxy_test_result {
+            let (result_icon, result_color, result_text) = match result {
+                Ok(info) => (
+                    Bootstrap::CheckCircleFill,
+                    Color::from_rgb(0.2, 0.78, 0.4),
+                    format!("Connected — {}", info),
+                ),
+                Err(err) => {
+                    let short = err.rsplit(": ").next().unwrap_or(err).to_string();
+                    (
+                        Bootstrap::XCircleFill,
+                        Color::from_rgb(0.9, 0.3, 0.3),
+                        short,
+                    )
+                }
+            };
+            row![
+                icon(result_icon)
+                    .size(13)
+                    .style(iced::theme::Text::Color(result_color)),
+                Space::with_width(5),
+                text(result_text)
+                    .size(12)
+                    .style(iced::theme::Text::Color(result_color)),
+                Space::with_width(Length::Fill),
+                test_btn,
+            ]
+            .align_items(Alignment::Center)
+            .width(Length::Fill)
+            .into()
+        } else {
+            row![Space::with_width(Length::Fill), test_btn,]
+                .align_items(Alignment::Center)
+                .width(Length::Fill)
+                .into()
+        };
+
+        rows.push(
+            container(test_row)
+                .width(Length::Fill)
+                .padding([10, 16])
+                .into(),
+        );
+    }
+
+    settings_group(colors, is_dark, "Network", rows)
 }
 
 fn settings_group<'a>(
@@ -690,6 +926,7 @@ fn build_search_bar<'a>(search_query: &'a str, colors: ColorScheme) -> Element<'
 
 fn build_url_bar<'a>(url_input: &str, colors: ColorScheme, adding: bool) -> Element<'a, Message> {
     let has_url = !url_input.trim().is_empty();
+    let is_multi = url_input.contains('\n');
 
     let input = if adding {
         text_input("Adding download...", url_input)
@@ -699,7 +936,7 @@ fn build_url_bar<'a>(url_input: &str, colors: ColorScheme, adding: bool) -> Elem
                 colors,
             })))
     } else {
-        text_input("Paste download URL here...", url_input)
+        text_input("Paste URL(s) – one per line for batch", url_input)
             .on_input(Message::UrlInputChanged)
             .on_submit(Message::AddDownload)
             .padding([10, 14])
@@ -709,13 +946,21 @@ fn build_url_bar<'a>(url_input: &str, colors: ColorScheme, adding: bool) -> Elem
             })))
     };
 
+    let add_label = if adding {
+        "Adding..."
+    } else if is_multi {
+        "Add All"
+    } else {
+        "Add"
+    };
+
     let add_button = if adding {
         button(
             row![
                 icon(Bootstrap::ArrowRepeat)
                     .style(iced::theme::Text::Color(Color::from_rgb(0.1, 0.1, 0.1))),
                 Space::with_width(6),
-                text("Adding...").size(14),
+                text(add_label).size(14),
             ]
             .align_items(Alignment::Center),
         )
@@ -729,7 +974,7 @@ fn build_url_bar<'a>(url_input: &str, colors: ColorScheme, adding: bool) -> Elem
                 icon(Bootstrap::Download)
                     .style(iced::theme::Text::Color(Color::from_rgb(0.1, 0.1, 0.1))),
                 Space::with_width(6),
-                text("Add").size(14),
+                text(add_label).size(14),
             ]
             .align_items(Alignment::Center),
         )
@@ -743,7 +988,7 @@ fn build_url_bar<'a>(url_input: &str, colors: ColorScheme, adding: bool) -> Elem
             row![
                 icon(Bootstrap::Download).style(iced::theme::Text::Color(colors.text_disabled)),
                 Space::with_width(6),
-                text("Add").size(14),
+                text(add_label).size(14),
             ]
             .align_items(Alignment::Center),
         )
@@ -752,6 +997,20 @@ fn build_url_bar<'a>(url_input: &str, colors: ColorScheme, adding: bool) -> Elem
             colors,
         })))
     };
+
+    let import_button = button(
+        row![
+            icon(Bootstrap::FileEarmarkArrowUp).size(14),
+            Space::with_width(4),
+            text("Import").size(13),
+        ]
+        .align_items(Alignment::Center),
+    )
+    .on_press(Message::ImportFile)
+    .padding([10, 14])
+    .style(iced::theme::Button::Custom(Box::new(
+        SecondaryButtonStyle { colors },
+    )));
 
     container(
         row![
@@ -764,6 +1023,8 @@ fn build_url_bar<'a>(url_input: &str, colors: ColorScheme, adding: bool) -> Elem
             input,
             Space::with_width(10),
             add_button,
+            Space::with_width(6),
+            import_button,
         ]
         .align_items(Alignment::Center)
         .width(Length::Fill),
