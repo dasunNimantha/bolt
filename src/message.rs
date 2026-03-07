@@ -41,5 +41,10 @@ pub enum Message {
     ScheduleDownload(Uuid, String),
     ClearSchedule(Uuid),
 
+    // Tray / window
+    WindowCloseRequested,
+    TrayShow,
+    TrayQuit,
+
     Noop,
 }

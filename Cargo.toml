@@ -42,3 +42,6 @@ url = "2"
 
 # Image for app icon
 image = { version = "0.24", default-features = false, features = ["png"] }
+
+# System tray
+tray-icon = "0.21"

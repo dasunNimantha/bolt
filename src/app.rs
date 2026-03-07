@@ -3,8 +3,10 @@ use crate::message::Message;
 use crate::model::{DownloadFilter, DownloadItem, ViewMode};
 use crate::settings::{AppSettings, DownloadDatabase};
 use crate::theme::{bolt_theme, ThemeMode};
+use crate::tray::BoltTray;
+use crate::utils::format::format_speed;
 use crate::view::build_view;
-use iced::{Application, Command, Element, Subscription, Theme};
+use iced::{event, window, Application, Command, Element, Event, Subscription, Theme};
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
@@ -24,6 +26,7 @@ pub struct BoltApp {
     speed_limit_input: String,
     max_concurrent_input: String,
     persist_counter: u32,
+    tray: Option<BoltTray>,
 }
 
 impl Application for BoltApp {
@@ -50,6 +53,8 @@ impl Application for BoltApp {
         };
         let max_concurrent_input = format!("{}", settings.max_concurrent);
 
+        let tray = BoltTray::new();
+
         let mut app = Self {
             engine,
             downloads: Vec::new(),
@@ -65,6 +70,7 @@ impl Application for BoltApp {
             speed_limit_input,
             max_concurrent_input,
             persist_counter: 0,
+            tray,
         };
         app.refresh_snapshots();
 
@@ -229,6 +235,7 @@ impl Application for BoltApp {
             Message::Tick => {
                 self.engine.update_state();
                 self.refresh_snapshots();
+                self.update_tray_tooltip();
 
                 self.persist_counter += 1;
                 if self.persist_counter.is_multiple_of(8) {
@@ -260,6 +267,21 @@ impl Application for BoltApp {
                             },
                             |msg| msg,
                         );
+                    }
+                }
+
+                if let Some(ref tray) = self.tray {
+                    if let Some(action) = tray.poll() {
+                        return match action {
+                            crate::tray::TrayAction::Show => Command::batch([
+                                window::minimize(window::Id::MAIN, false),
+                                window::gain_focus(window::Id::MAIN),
+                            ]),
+                            crate::tray::TrayAction::Quit => {
+                                self.save_downloads();
+                                window::close(window::Id::MAIN)
+                            }
+                        };
                     }
                 }
 
@@ -359,6 +381,27 @@ impl Application for BoltApp {
                 Command::none()
             }
 
+            Message::WindowCloseRequested => {
+                let (_total, active, _completed, paused, _failed) = self.counts;
+                if active > 0 || paused > 0 {
+                    self.save_downloads();
+                    window::minimize(window::Id::MAIN, true)
+                } else {
+                    self.save_downloads();
+                    window::close(window::Id::MAIN)
+                }
+            }
+
+            Message::TrayShow => Command::batch([
+                window::minimize(window::Id::MAIN, false),
+                window::gain_focus(window::Id::MAIN),
+            ]),
+
+            Message::TrayQuit => {
+                self.save_downloads();
+                window::close(window::Id::MAIN)
+            }
+
             Message::Noop => Command::none(),
         }
     }
@@ -383,17 +426,27 @@ impl Application for BoltApp {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let has_active = self.counts.1 > 0;
-        let has_scheduled = self
-            .downloads
-            .iter()
-            .any(|d| d.scheduled_at.is_some() && d.status == crate::model::DownloadStatus::Queued);
+        let close_sub = event::listen_with(|e, _status| match e {
+            Event::Window(_, window::Event::CloseRequested) => Some(Message::WindowCloseRequested),
+            _ => None,
+        });
 
-        if has_active || has_scheduled {
+        let has_active = self.counts.1 > 0;
+        let has_scheduled = self.downloads.iter().any(|d| {
+            d.scheduled_at.is_some()
+                && d.status == crate::model::DownloadStatus::Queued
+        });
+        let has_tray = self.tray.is_some();
+
+        let tick_sub = if has_active {
             iced::time::every(Duration::from_millis(250)).map(|_| Message::Tick)
+        } else if has_scheduled || has_tray {
+            iced::time::every(Duration::from_millis(2000)).map(|_| Message::Tick)
         } else {
             Subscription::none()
-        }
+        };
+
+        Subscription::batch([close_sub, tick_sub])
     }
 
     fn theme(&self) -> Theme {
@@ -412,6 +465,27 @@ impl BoltApp {
     fn save_downloads(&self) {
         let db = self.engine.persist();
         db.save();
+    }
+
+    fn update_tray_tooltip(&self) {
+        if let Some(ref tray) = self.tray {
+            let (total, active, completed, paused, _failed) = self.counts;
+            let tip = if active > 0 {
+                format!(
+                    "Bolt - {} active at {} | {} total",
+                    active,
+                    format_speed(self.total_speed),
+                    total
+                )
+            } else if paused > 0 {
+                format!("Bolt - {} paused | {} total", paused, total)
+            } else if completed > 0 {
+                format!("Bolt - {} completed | {} total", completed, total)
+            } else {
+                "Bolt - Download Manager".to_string()
+            };
+            tray.set_tooltip(&tip);
+        }
     }
 }
 
