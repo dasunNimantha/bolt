@@ -1,6 +1,6 @@
 # Privacy Policy — Bolt Download Manager Browser Extension
 
-**Last updated:** March 7, 2026
+**Last updated:** March 8, 2026
 
 ## Overview
 
@@ -13,14 +13,16 @@ When a download is initiated in your browser, the Extension accesses the followi
 - **Download URL** — the address of the file being downloaded.
 - **Filename** — the name suggested by the browser or server for the downloaded file.
 - **Referrer** — the page URL from which the download was triggered.
-- **Cookies** — cookies associated with the download domain, used to authenticate the download request so Bolt can resume or accelerate it.
+- **Cookies** (optional, user-granted) — cookies associated with the download domain, used to authenticate the download request so Bolt can resume or accelerate it. Cookie access requires an explicit opt-in by the user via the extension popup.
 
 ## How Data Is Used
 
 All accessed data is sent exclusively to the **locally installed Bolt desktop application** on your computer via Chrome's Native Messaging API. This communication happens entirely on your local machine through an OS-level IPC channel. The data is used solely to:
 
 - Add the download to Bolt's download queue.
-- Authenticate with the server hosting the file (using the forwarded cookies).
+- Authenticate with the server hosting the file (using the forwarded cookies, if granted).
+
+If the Bolt desktop application is not running, the Extension falls back to the browser's default download handler and no data is sent.
 
 ## Data Storage
 
@@ -41,11 +43,11 @@ All data remains on your local machine and is only shared between the Extension 
 
 | Permission | Reason |
 |---|---|
-| `downloads` | Required to detect new downloads and cancel them so Bolt can handle them instead. |
-| `cookies` | Required to forward authentication cookies to Bolt so it can download files that require login. |
+| `downloads` | Required to detect new downloads and cancel them so Bolt can handle them instead. When Bolt is not running, the download is re-triggered through the browser's default handler. |
 | `nativeMessaging` | Required to communicate with the Bolt desktop application via the native messaging host. |
 | `storage` | Required to persist the on/off toggle preference. |
-| `<all_urls>` (host permission) | Required to access cookies for any domain from which a download may originate. Without this, authenticated downloads from arbitrary sites would fail. |
+| `cookies` (optional) | Requested at runtime when the user enables "Forward Cookies" in the popup. Used to forward authentication cookies to Bolt so it can download files that require login. |
+| `<all_urls>` (optional host permission) | Requested at runtime alongside cookies. Required to access cookies for any domain from which a download may originate. |
 
 ## Open Source
 
