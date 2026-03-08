@@ -5,11 +5,13 @@
   "version": "0.1.0",
   "permissions": [
     "downloads",
-    "cookies",
     "nativeMessaging",
     "storage"
   ],
-  "host_permissions": [
+  "optional_permissions": [
+    "cookies"
+  ],
+  "optional_host_permissions": [
     "<all_urls>"
   ],
   "background": {

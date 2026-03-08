@@ -50,11 +50,13 @@ chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
 async function gatherAndSend(url, filename, referrer) {
   let cookies = null;
   try {
-    const cookieList = await chrome.cookies.getAll({
-      domain: new URL(url).hostname,
-    });
-    if (cookieList.length) {
-      cookies = cookieList.map((c) => `${c.name}=${c.value}`).join("; ");
+    if (chrome.cookies) {
+      const cookieList = await chrome.cookies.getAll({
+        domain: new URL(url).hostname,
+      });
+      if (cookieList.length) {
+        cookies = cookieList.map((c) => `${c.name}=${c.value}`).join("; ");
+      }
     }
   } catch (_) {}
 
