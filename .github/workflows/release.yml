@@ -127,6 +127,7 @@ jobs:
           assets: |
             dist/aur/bolt.desktop
             dist/aur/bolt.svg
+            dist/aur/bolt-dm-bin.install
           updpkgsums: false
           commit_username: dasunNimantha
           commit_email: ${{ secrets.AUR_EMAIL }}

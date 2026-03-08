@@ -11,8 +11,10 @@ provides=('bolt-dm')
 conflicts=('bolt-dm')
 source=("${url}/releases/download/v${pkgver//_/-}/bolt-linux-x86_64"
         "bolt.desktop"
-        "bolt.svg")
+        "bolt.svg"
+        "bolt-dm-bin.install")
 sha256sums=('SKIP'
+            'SKIP'
             'SKIP'
             'SKIP')
 
