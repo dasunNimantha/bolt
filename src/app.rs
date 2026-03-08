@@ -17,6 +17,14 @@ use uuid::Uuid;
 
 const NETWORK_CHECK_INTERVAL: u32 = 12;
 
+fn app_icon() -> window::Icon {
+    let bytes = include_bytes!("../assets/icon.png");
+    let img = image::load_from_memory(bytes).expect("embedded icon is valid PNG");
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    window::icon::from_rgba(rgba.into_raw(), w, h).expect("icon dimensions are valid")
+}
+
 pub struct BoltApp {
     engine: Arc<DownloadEngine>,
     downloads: Vec<DownloadItem>,
@@ -111,6 +119,7 @@ impl BoltApp {
             size: iced::Size::new(1000.0, 650.0),
             min_size: Some(iced::Size::new(750.0, 450.0)),
             exit_on_close_request: false,
+            icon: Some(app_icon()),
             #[cfg(target_os = "linux")]
             platform_specific: window::settings::PlatformSpecific {
                 application_id: "com.bolt.downloadmanager".to_string(),
@@ -395,6 +404,7 @@ impl BoltApp {
                                 resizable: false,
                                 level: window::Level::AlwaysOnTop,
                                 exit_on_close_request: false,
+                                icon: Some(app_icon()),
                                 ..Default::default()
                             });
                             let engine = self.engine.clone();
