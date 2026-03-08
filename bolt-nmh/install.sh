@@ -10,7 +10,7 @@ usage() {
     echo "  chrome-extension-id  Chrome extension ID (from chrome://extensions)"
     echo "  bolt-nmh-path        Path to bolt-nmh binary (default: auto-detect from cargo)"
     echo ""
-    echo "Installs the native messaging host manifest for Chrome/Chromium and Firefox."
+    echo "Installs the native messaging host manifest for Chrome/Chromium, Edge, and Firefox."
     exit 1
 }
 
@@ -45,11 +45,13 @@ case "$(uname -s)" in
     Linux)
         CHROME_DIR="$HOME/.config/google-chrome/NativeMessagingHosts"
         CHROMIUM_DIR="$HOME/.config/chromium/NativeMessagingHosts"
+        EDGE_DIR="$HOME/.config/microsoft-edge/NativeMessagingHosts"
         FIREFOX_DIR="$HOME/.mozilla/native-messaging-hosts"
         ;;
     Darwin)
         CHROME_DIR="$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts"
         CHROMIUM_DIR="$HOME/Library/Application Support/Chromium/NativeMessagingHosts"
+        EDGE_DIR="$HOME/Library/Application Support/Microsoft Edge/NativeMessagingHosts"
         FIREFOX_DIR="$HOME/Library/Application Support/Mozilla/NativeMessagingHosts"
         ;;
     *)
@@ -86,8 +88,8 @@ EOF
 
 installed=0
 
-# Install for Chrome/Chromium
-for DIR in "$CHROME_DIR" "$CHROMIUM_DIR"; do
+# Install for Chrome/Chromium/Edge
+for DIR in "$CHROME_DIR" "$CHROMIUM_DIR" "$EDGE_DIR"; do
     BROWSER_NAME="$(basename "$(dirname "$DIR")")"
     if [ -d "$(dirname "$DIR")" ]; then
         mkdir -p "$DIR"

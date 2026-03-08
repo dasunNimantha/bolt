@@ -227,6 +227,19 @@ export function DocsPage() {
                     ),
                   },
                   {
+                    label: "Edge",
+                    content: (
+                      <>
+                        <P>Install from the Edge Add-ons store (coming soon), or load manually:</P>
+                        <ol className="space-y-2 ml-1 my-3">
+                          <Step n={1}>Open <code className="text-text-primary text-xs bg-white/[0.04] px-1.5 py-0.5 rounded">edge://extensions</code> in Edge</Step>
+                          <Step n={2}>Enable <strong className="text-text-primary">Developer Mode</strong> (bottom-left toggle)</Step>
+                          <Step n={3}>Click <strong className="text-text-primary">Load unpacked</strong> → select the <code className="text-text-primary text-xs bg-white/[0.04] px-1.5 py-0.5 rounded">extension/</code> folder</Step>
+                        </ol>
+                      </>
+                    ),
+                  },
+                  {
                     label: "Firefox",
                     content: (
                       <>

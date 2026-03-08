@@ -148,10 +148,10 @@ src/
 
 bolt-nmh/                # Native messaging host (workspace member)
 ├── src/main.rs          # Browser NMH ↔ Bolt IPC bridge
-├── install.sh           # Linux/macOS install script (Chrome + Firefox)
+├── install.sh           # Linux/macOS install script (Chrome, Edge, Firefox)
 └── com.bolt.nmh.json.template
 
-extension/               # Browser extension (Manifest V3, Chrome + Firefox)
+extension/               # Browser extension (Manifest V3, Chrome + Edge + Firefox)
 ├── manifest.json        # Permissions: downloads, nativeMessaging, storage
 ├── background.js        # Download interception, cookie forwarding, NMH messaging
 ├── popup.html           # Extension popup UI
