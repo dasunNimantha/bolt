@@ -620,6 +620,43 @@ pub fn scrollable_style(
 
 // ============== Checkbox / Toggle Style ==============
 
+pub fn toggle_style(colors: ColorScheme) -> impl Fn(&Theme, checkbox::Status) -> checkbox::Style {
+    move |_theme, status| {
+        let (is_checked, is_hovered) = match status {
+            checkbox::Status::Active { is_checked } => (is_checked, false),
+            checkbox::Status::Hovered { is_checked } => (is_checked, true),
+            checkbox::Status::Disabled { is_checked } => (is_checked, false),
+        };
+
+        let bg = if is_hovered {
+            if is_checked {
+                Background::Color(colors.accent_hover)
+            } else {
+                Background::Color(colors.bg_hover)
+            }
+        } else if is_checked {
+            Background::Color(colors.accent_primary)
+        } else {
+            Background::Color(colors.bg_tertiary)
+        };
+
+        checkbox::Style {
+            background: bg,
+            icon_color: if is_checked {
+                Color::from_rgb(0.1, 0.1, 0.1)
+            } else {
+                Color::WHITE
+            },
+            border: Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: 12.0.into(),
+            },
+            text_color: Some(colors.text_primary),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -705,42 +742,5 @@ mod tests {
         let json = serde_json::to_string(&mode).unwrap();
         let restored: ThemeMode = serde_json::from_str(&json).unwrap();
         assert_eq!(restored, mode);
-    }
-}
-
-pub fn toggle_style(colors: ColorScheme) -> impl Fn(&Theme, checkbox::Status) -> checkbox::Style {
-    move |_theme, status| {
-        let (is_checked, is_hovered) = match status {
-            checkbox::Status::Active { is_checked } => (is_checked, false),
-            checkbox::Status::Hovered { is_checked } => (is_checked, true),
-            checkbox::Status::Disabled { is_checked } => (is_checked, false),
-        };
-
-        let bg = if is_hovered {
-            if is_checked {
-                Background::Color(colors.accent_hover)
-            } else {
-                Background::Color(colors.bg_hover)
-            }
-        } else if is_checked {
-            Background::Color(colors.accent_primary)
-        } else {
-            Background::Color(colors.bg_tertiary)
-        };
-
-        checkbox::Style {
-            background: bg,
-            icon_color: if is_checked {
-                Color::from_rgb(0.1, 0.1, 0.1)
-            } else {
-                Color::WHITE
-            },
-            border: Border {
-                color: Color::TRANSPARENT,
-                width: 0.0,
-                radius: 12.0.into(),
-            },
-            text_color: Some(colors.text_primary),
-        }
     }
 }
