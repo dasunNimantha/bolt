@@ -30,6 +30,7 @@ export function Navbar() {
 
   return (
     <nav
+      aria-label="Main navigation"
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 border-b ${
         scrolled
           ? "bg-surface/80 backdrop-blur-xl border-white/[0.06] shadow-lg shadow-black/20"
@@ -37,7 +38,7 @@ export function Navbar() {
       }`}
     >
       <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-2.5 group">
+        <Link to="/" className="flex items-center gap-2.5 group" aria-label="Bolt — Home">
           <BoltLogo className="w-8 h-8 transition-transform duration-300 group-hover:scale-110" />
           <span className="text-lg font-bold tracking-tight">Bolt</span>
         </Link>
@@ -60,6 +61,8 @@ export function Navbar() {
 
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
+          aria-label={mobileOpen ? "Close menu" : "Open menu"}
+          aria-expanded={mobileOpen}
           className="md:hidden text-text-secondary hover:text-text-primary p-2 rounded-lg hover:bg-white/[0.06] transition-colors"
         >
           {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Navbar } from "../components/Navbar";
 import { Footer } from "../components/Footer";
+import { useSEO } from "../hooks/useSEO";
 import {
   Terminal,
   Globe,
@@ -86,6 +87,13 @@ const nav: NavSection[] = [
 export function DocsPage() {
   const [active, setActive] = useState("installation");
 
+  useSEO({
+    title: "Documentation — Bolt Download Manager",
+    description:
+      "Installation guide, browser extension setup, configuration, and architecture overview for Bolt download manager.",
+    canonical: "https://boltdm.site/docs",
+  });
+
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
@@ -110,7 +118,7 @@ export function DocsPage() {
     <div className="min-h-screen">
       <Navbar />
 
-      <div className="max-w-[1100px] mx-auto px-6 pt-28 pb-20">
+      <main className="max-w-[1100px] mx-auto px-6 pt-28 pb-20">
         {/* Header */}
         <div className="mb-12">
           <div className="flex items-center gap-2 text-bolt text-sm font-medium mb-3">
@@ -353,7 +361,7 @@ export function DocsPage() {
             </section>
           </article>
         </div>
-      </div>
+      </main>
 
       <Footer />
     </div>

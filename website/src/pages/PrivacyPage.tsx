@@ -1,11 +1,19 @@
 import { useEffect } from "react";
 import { Navbar } from "../components/Navbar";
 import { Footer } from "../components/Footer";
+import { useSEO } from "../hooks/useSEO";
 import { Shield, ExternalLink } from "lucide-react";
 
 const REPO = "dasunNimantha/bolt";
 
 export function PrivacyPage() {
+  useSEO({
+    title: "Privacy Policy — Bolt Download Manager",
+    description:
+      "Privacy policy for the Bolt Download Manager browser extension. No data collection, no tracking, no external servers.",
+    canonical: "https://boltdm.site/privacy",
+  });
+
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
@@ -14,7 +22,7 @@ export function PrivacyPage() {
     <div className="min-h-screen">
       <Navbar />
 
-      <div className="max-w-3xl mx-auto px-6 pt-28 pb-20">
+      <main className="max-w-3xl mx-auto px-6 pt-28 pb-20">
         <div className="mb-12">
           <div className="flex items-center gap-2 text-bolt text-sm font-medium mb-3">
             <Shield className="w-4 h-4" />
@@ -159,7 +167,7 @@ export function PrivacyPage() {
             </P>
           </Section>
         </article>
-      </div>
+      </main>
 
       <Footer />
     </div>

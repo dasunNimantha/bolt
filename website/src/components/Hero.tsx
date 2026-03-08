@@ -50,6 +50,7 @@ export function Hero() {
               href="#download"
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.98 }}
+              aria-label="Download Bolt download manager"
               className="group relative flex items-center gap-2.5 px-8 py-4 bg-bolt text-black font-semibold rounded-2xl shadow-xl shadow-bolt/25 transition-shadow hover:shadow-2xl hover:shadow-bolt/30"
             >
               <Download className="w-5 h-5 transition-transform group-hover:-translate-y-0.5" />
@@ -62,6 +63,7 @@ export function Hero() {
               rel="noopener noreferrer"
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.98 }}
+              aria-label="View Bolt source code on GitHub"
               className="flex items-center gap-2.5 px-8 py-4 glass-card border border-white/[0.08] text-text-primary font-semibold rounded-2xl hover:border-white/[0.15] transition-all"
             >
               <Github className="w-5 h-5" />
