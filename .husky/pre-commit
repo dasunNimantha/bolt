@@ -1,0 +1,23 @@
+#!/bin/sh
+
+echo "Running pre-commit checks..."
+
+echo "→ cargo fmt --check"
+cargo fmt --check || {
+  echo "✗ cargo fmt failed. Run 'cargo fmt' to fix."
+  exit 1
+}
+
+echo "→ cargo clippy"
+cargo clippy --workspace --all-targets -- -D warnings || {
+  echo "✗ cargo clippy found warnings/errors."
+  exit 1
+}
+
+echo "→ cargo test"
+cargo test --workspace || {
+  echo "✗ cargo test failed."
+  exit 1
+}
+
+echo "✓ All pre-commit checks passed."

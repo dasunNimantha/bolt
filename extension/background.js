@@ -1,4 +1,6 @@
 const NATIVE_HOST = "com.bolt.nmh";
+const IS_FIREFOX =
+  typeof browser !== "undefined" && !!browser.runtime?.getBrowserInfo;
 
 let interceptEnabled = true;
 const interceptedIds = new Set();
@@ -28,30 +30,45 @@ chrome.downloads.onCreated.addListener((downloadItem) => {
   const age = Date.now() - new Date(downloadItem.startTime).getTime();
   if (age > 5000) return;
 
-  interceptedIds.add(downloadItem.id);
-  setTimeout(() => interceptedIds.delete(downloadItem.id), 10000);
-
   gatherAndSend(
     url,
     extractFilename(downloadItem.filename),
     downloadItem.referrer || null,
   );
-});
 
-chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
-  if (interceptedIds.delete(downloadItem.id)) {
+  if (IS_FIREFOX) {
     const dlId = downloadItem.id;
-    suggest({ filename: downloadItem.filename });
     chrome.downloads.cancel(dlId, () => {
       const _err = chrome.runtime.lastError;
       chrome.downloads.erase({ id: dlId }, () => {
         const _err2 = chrome.runtime.lastError;
       });
     });
-    return;
+  } else {
+    interceptedIds.add(downloadItem.id);
+    setTimeout(() => interceptedIds.delete(downloadItem.id), 10000);
   }
-  suggest();
 });
+
+// Chrome-only: onDeterminingFilename does not exist in Firefox
+if (!IS_FIREFOX) {
+  chrome.downloads.onDeterminingFilename.addListener(
+    (downloadItem, suggest) => {
+      if (interceptedIds.delete(downloadItem.id)) {
+        const dlId = downloadItem.id;
+        suggest({ filename: downloadItem.filename });
+        chrome.downloads.cancel(dlId, () => {
+          const _err = chrome.runtime.lastError;
+          chrome.downloads.erase({ id: dlId }, () => {
+            const _err2 = chrome.runtime.lastError;
+          });
+        });
+        return;
+      }
+      suggest();
+    },
+  );
+}
 
 // ─── Shared helpers ─────────────────────────────────────────────────────
 

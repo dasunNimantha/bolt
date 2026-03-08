@@ -2,15 +2,17 @@ use std::path::{Path, PathBuf};
 
 const MANIFEST_NAME: &str = "com.bolt.nmh.json";
 
-/// Extension IDs allowed to connect to the native messaging host.
+/// Chrome extension IDs allowed to connect (allowed_origins format).
 /// Add the Chrome Web Store extension ID here once published.
-const ALLOWED_EXTENSION_IDS: &[&str] = &[
-    // Chrome Web Store ID (update after publishing)
+const ALLOWED_CHROME_IDS: &[&str] = &[
     // "chrome-extension://YOUR_STORE_ID_HERE/",
 ];
 
+/// Firefox extension ID (allowed_extensions format).
+const FIREFOX_EXTENSION_ID: &str = "bolt@boltdm.site";
+
 /// Automatically install the native messaging host manifest for all
-/// detected browsers. Called once on startup — skips browsers that
+/// detected browsers. Called once on startup -- skips browsers that
 /// already have the manifest installed.
 pub fn auto_install() {
     let nmh_binary = match find_nmh_binary() {
@@ -18,23 +20,25 @@ pub fn auto_install() {
         None => return,
     };
 
-    if ALLOWED_EXTENSION_IDS.is_empty() {
+    if ALLOWED_CHROME_IDS.is_empty() {
         install_for_dev_mode(&nmh_binary);
         return;
     }
 
-    let origins: Vec<String> = ALLOWED_EXTENSION_IDS
-        .iter()
-        .map(|id| id.to_string())
-        .collect();
+    let chrome_origins: Vec<String> = ALLOWED_CHROME_IDS.iter().map(|id| id.to_string()).collect();
+    let firefox_extensions = vec![FIREFOX_EXTENSION_ID.to_string()];
 
     for dir in nmh_dirs() {
-        install_manifest(&dir, &nmh_binary, &origins);
+        if is_firefox_dir(&dir) {
+            install_manifest_firefox(&dir, &nmh_binary, &firefox_extensions);
+        } else {
+            install_manifest_chrome(&dir, &nmh_binary, &chrome_origins);
+        }
     }
 }
 
 /// In dev mode (no store IDs configured), look for existing manifests
-/// and refresh the binary path without overwriting the allowed_origins.
+/// and refresh the binary path without overwriting the allowed_origins/allowed_extensions.
 fn install_for_dev_mode(nmh_binary: &Path) {
     for dir in nmh_dirs() {
         let manifest_path = dir.join(MANIFEST_NAME);
@@ -56,7 +60,7 @@ fn install_for_dev_mode(nmh_binary: &Path) {
     }
 }
 
-fn install_manifest(host_dir: &Path, nmh_binary: &Path, origins: &[String]) {
+fn install_manifest_chrome(host_dir: &Path, nmh_binary: &Path, origins: &[String]) {
     let manifest_path = host_dir.join(MANIFEST_NAME);
     if manifest_path.exists() {
         return;
@@ -78,6 +82,34 @@ fn install_manifest(host_dir: &Path, nmh_binary: &Path, origins: &[String]) {
     }
 }
 
+fn install_manifest_firefox(host_dir: &Path, nmh_binary: &Path, extensions: &[String]) {
+    let manifest_path = host_dir.join(MANIFEST_NAME);
+    if manifest_path.exists() {
+        return;
+    }
+
+    let manifest = serde_json::json!({
+        "name": "com.bolt.nmh",
+        "description": "Bolt Download Manager Native Messaging Host",
+        "path": nmh_binary.to_string_lossy(),
+        "type": "stdio",
+        "allowed_extensions": extensions
+    });
+
+    if let Some(parent) = manifest_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(data) = serde_json::to_string_pretty(&manifest) {
+        let _ = std::fs::write(&manifest_path, data);
+    }
+}
+
+/// Returns true if the NMH directory belongs to a Mozilla/Firefox browser.
+fn is_firefox_dir(dir: &Path) -> bool {
+    let path_str = dir.to_string_lossy().to_lowercase();
+    path_str.contains("mozilla") || path_str.contains("firefox")
+}
+
 /// Locate the bolt-nmh binary next to the running bolt executable.
 fn find_nmh_binary() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
@@ -92,9 +124,6 @@ fn find_nmh_binary() -> Option<PathBuf> {
     if candidate.exists() {
         return Some(candidate);
     }
-
-    // Cargo workspace: target/release/bolt → target/release/bolt-nmh
-    // Already covered above since both land in the same dir.
 
     // Development fallback: check target/release and target/debug
     if let Some(project_root) = dir.parent().and_then(|p| p.parent()) {
@@ -118,11 +147,16 @@ fn nmh_dirs() -> Vec<PathBuf> {
     {
         if let Some(base) = directories::BaseDirs::new() {
             let config = base.config_dir();
+            // Chromium-based browsers
             dirs.push(config.join("google-chrome/NativeMessagingHosts"));
             dirs.push(config.join("chromium/NativeMessagingHosts"));
             dirs.push(config.join("BraveSoftware/Brave-Browser/NativeMessagingHosts"));
             dirs.push(config.join("microsoft-edge/NativeMessagingHosts"));
             dirs.push(config.join("vivaldi/NativeMessagingHosts"));
+        }
+        if let Some(home) = directories::BaseDirs::new().map(|b| b.home_dir().to_path_buf()) {
+            // Firefox
+            dirs.push(home.join(".mozilla/native-messaging-hosts"));
         }
     }
 
@@ -131,11 +165,14 @@ fn nmh_dirs() -> Vec<PathBuf> {
         if let Some(base) = directories::BaseDirs::new() {
             let home = base.home_dir();
             let lib = home.join("Library/Application Support");
+            // Chromium-based browsers
             dirs.push(lib.join("Google/Chrome/NativeMessagingHosts"));
             dirs.push(lib.join("Chromium/NativeMessagingHosts"));
             dirs.push(lib.join("BraveSoftware/Brave-Browser/NativeMessagingHosts"));
             dirs.push(lib.join("Microsoft Edge/NativeMessagingHosts"));
             dirs.push(lib.join("Vivaldi/NativeMessagingHosts"));
+            // Firefox
+            dirs.push(lib.join("Mozilla/NativeMessagingHosts"));
         }
     }
 
@@ -157,15 +194,12 @@ fn install_windows_registry() {
         None => return,
     };
 
-    // Write manifest JSON next to the binary
     let manifest_dir = nmh_binary.parent().unwrap_or(Path::new("."));
     let manifest_path = manifest_dir.join(MANIFEST_NAME);
 
-    if !manifest_path.exists() && !ALLOWED_EXTENSION_IDS.is_empty() {
-        let origins: Vec<String> = ALLOWED_EXTENSION_IDS
-            .iter()
-            .map(|id| id.to_string())
-            .collect();
+    // Chrome manifest (allowed_origins)
+    if !manifest_path.exists() && !ALLOWED_CHROME_IDS.is_empty() {
+        let origins: Vec<String> = ALLOWED_CHROME_IDS.iter().map(|id| id.to_string()).collect();
 
         let manifest = serde_json::json!({
             "name": "com.bolt.nmh",
@@ -180,8 +214,26 @@ fn install_windows_registry() {
         }
     }
 
-    // Register in HKCU for Chrome and Edge
+    // Firefox manifest (allowed_extensions) — separate file next to chrome manifest
+    let firefox_manifest_path = manifest_dir.join("com.bolt.nmh.firefox.json");
+    if !firefox_manifest_path.exists() {
+        let manifest = serde_json::json!({
+            "name": "com.bolt.nmh",
+            "description": "Bolt Download Manager Native Messaging Host",
+            "path": nmh_binary.to_string_lossy().replace('/', "\\"),
+            "type": "stdio",
+            "allowed_extensions": [FIREFOX_EXTENSION_ID]
+        });
+
+        if let Ok(data) = serde_json::to_string_pretty(&manifest) {
+            let _ = std::fs::write(&firefox_manifest_path, data);
+        }
+    }
+
     let manifest_str = manifest_path.to_string_lossy().replace('/', "\\");
+    let firefox_manifest_str = firefox_manifest_path.to_string_lossy().replace('/', "\\");
+
+    // Register in HKCU for Chrome and Edge
     for key in &[
         r"Software\Google\Chrome\NativeMessagingHosts\com.bolt.nmh",
         r"Software\Microsoft\Edge\NativeMessagingHosts\com.bolt.nmh",
@@ -199,4 +251,18 @@ fn install_windows_registry() {
             ])
             .output();
     }
+
+    // Register in HKCU for Firefox
+    let _ = Command::new("reg")
+        .args([
+            "add",
+            r"HKCU\Software\Mozilla\NativeMessagingHosts\com.bolt.nmh",
+            "/ve",
+            "/t",
+            "REG_SZ",
+            "/d",
+            &firefox_manifest_str,
+            "/f",
+        ])
+        .output();
 }

@@ -15,7 +15,7 @@ Fast multi-threaded download manager for Linux, Windows and macOS. Built with Ru
 - **File categorization** -- automatic category detection (Video, Audio, Document, Archive, Image, Application) from file extension
 - **Download history** -- completed downloads are tracked persistently (up to 500 entries) with filename and URL search
 - **Batch downloads** -- paste multiple URLs or import from a text file to queue downloads in bulk
-- **Browser integration** -- Chrome/Chromium extension intercepts downloads, captures cookies and referrer, and sends them to Bolt with a confirmation popup
+- **Browser integration** -- extension for Chrome, Edge, Brave, Vivaldi, Firefox and other browsers intercepts downloads, captures cookies and referrer, and sends them to Bolt with a confirmation popup
 - **Dark / Light / System theme** -- three theme modes with full widget styling
 - **Multi-window** -- browser-intercepted downloads each open in their own always-on-top confirmation dialog with Start/Queue/Dismiss
 - **Auto-start on login** -- optional system autostart (Linux `.desktop`, macOS `launchd`, Windows registry)
@@ -23,10 +23,10 @@ Fast multi-threaded download manager for Linux, Windows and macOS. Built with Ru
 
 ## Browser Integration
 
-Bolt intercepts downloads from Chrome/Chromium-based browsers. Three components work together:
+Bolt intercepts downloads from Chrome/Chromium-based browsers and Firefox. Three components work together:
 
-1. **Chrome extension** (`extension/`) -- intercepts `chrome.downloads.onCreated`, cancels the browser download, captures cookies and referrer, sends the request to the native messaging host
-2. **Native messaging host** (`bolt-nmh`) -- bridges Chrome's native messaging protocol (stdin/stdout, 4-byte length-prefixed JSON) to Bolt's TCP IPC server
+1. **Browser extension** (`extension/`) -- intercepts `chrome.downloads.onCreated`, cancels the browser download, captures cookies and referrer, sends the request to the native messaging host. Compatible with Chrome, Edge, Brave, Vivaldi, and Firefox (Manifest V3).
+2. **Native messaging host** (`bolt-nmh`) -- bridges the browser's native messaging protocol (stdin/stdout, 4-byte length-prefixed JSON) to Bolt's TCP IPC server
 3. **IPC server** (inside Bolt) -- listens on `localhost:9817` for JSON download requests; each download opens its own confirmation popup
 
 The extension popup provides toggles for:
@@ -39,17 +39,22 @@ The extension popup provides toggles for:
 # Build the native messaging host
 cargo build --release -p bolt-nmh
 
-# Install the NMH manifest (Linux — auto-detects Chrome, Chromium, Brave, Edge, Vivaldi)
-cd bolt-nmh && ./install.sh <your-extension-id>
+# Install the NMH manifest (auto-detects Chrome, Chromium, Brave, Edge, Vivaldi, Firefox)
+cd bolt-nmh && ./install.sh <your-chrome-extension-id>
 
 # Alternatively, Bolt auto-installs/updates the NMH manifest on startup
 # if an existing manifest is found (dev mode)
 ```
 
-Load the extension in Chrome:
+**Chrome / Chromium-based browsers:**
 1. Open `chrome://extensions`
 2. Enable **Developer Mode**
 3. Click **Load unpacked** and select the `extension/` directory
+
+**Firefox:**
+1. Open `about:debugging#/runtime/this-firefox`
+2. Click **Load Temporary Add-on**
+3. Select `extension/manifest.json`
 
 ## Building
 
@@ -142,11 +147,11 @@ src/
     └── format.rs        # Byte/speed/ETA/filename formatting
 
 bolt-nmh/                # Native messaging host (workspace member)
-├── src/main.rs          # Chrome NMH ↔ Bolt IPC bridge
-├── install.sh           # Linux/macOS install script
+├── src/main.rs          # Browser NMH ↔ Bolt IPC bridge
+├── install.sh           # Linux/macOS install script (Chrome + Firefox)
 └── com.bolt.nmh.json.template
 
-extension/               # Chrome extension (Manifest V3)
+extension/               # Browser extension (Manifest V3, Chrome + Firefox)
 ├── manifest.json        # Permissions: downloads, nativeMessaging, storage
 ├── background.js        # Download interception, cookie forwarding, NMH messaging
 ├── popup.html           # Extension popup UI

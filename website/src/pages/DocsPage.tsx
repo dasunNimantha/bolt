@@ -206,16 +206,44 @@ export function DocsPage() {
               <H2>Browser Extension</H2>
               <P>
                 The extension intercepts downloads and sends them to the Bolt desktop app.
-                Works with Chrome, Edge, Brave, Vivaldi, and other Chromium browsers. Firefox support coming soon.
+                Works with Chrome, Edge, Brave, Vivaldi, Firefox, and other Chromium browsers.
               </P>
 
               <H3>Step 1 — Install the extension</H3>
-              <P>Install from the Chrome Web Store (coming soon), or load manually:</P>
-              <ol className="space-y-2 ml-1 my-3">
-                <Step n={1}>Open <code className="text-text-primary text-xs bg-white/[0.04] px-1.5 py-0.5 rounded">chrome://extensions</code> in your browser</Step>
-                <Step n={2}>Enable <strong className="text-text-primary">Developer Mode</strong> (top-right toggle)</Step>
-                <Step n={3}>Click <strong className="text-text-primary">Load unpacked</strong> → select the <code className="text-text-primary text-xs bg-white/[0.04] px-1.5 py-0.5 rounded">extension/</code> folder</Step>
-              </ol>
+
+              <Tabs
+                tabs={[
+                  {
+                    label: "Chrome / Chromium",
+                    content: (
+                      <>
+                        <P>Install from the Chrome Web Store (coming soon), or load manually:</P>
+                        <ol className="space-y-2 ml-1 my-3">
+                          <Step n={1}>Open <code className="text-text-primary text-xs bg-white/[0.04] px-1.5 py-0.5 rounded">chrome://extensions</code> in your browser</Step>
+                          <Step n={2}>Enable <strong className="text-text-primary">Developer Mode</strong> (top-right toggle)</Step>
+                          <Step n={3}>Click <strong className="text-text-primary">Load unpacked</strong> → select the <code className="text-text-primary text-xs bg-white/[0.04] px-1.5 py-0.5 rounded">extension/</code> folder</Step>
+                        </ol>
+                      </>
+                    ),
+                  },
+                  {
+                    label: "Firefox",
+                    content: (
+                      <>
+                        <P>Install from Firefox Add-ons (coming soon), or load temporarily:</P>
+                        <ol className="space-y-2 ml-1 my-3">
+                          <Step n={1}>Open <code className="text-text-primary text-xs bg-white/[0.04] px-1.5 py-0.5 rounded">about:debugging#/runtime/this-firefox</code></Step>
+                          <Step n={2}>Click <strong className="text-text-primary">Load Temporary Add-on</strong></Step>
+                          <Step n={3}>Select <code className="text-text-primary text-xs bg-white/[0.04] px-1.5 py-0.5 rounded">extension/manifest.json</code></Step>
+                        </ol>
+                        <Callout>
+                          Temporary add-ons are removed when Firefox restarts. For permanent installs, use Firefox Add-ons or sign the extension via <code className="text-text-primary text-xs">web-ext sign</code>.
+                        </Callout>
+                      </>
+                    ),
+                  },
+                ]}
+              />
 
               <H3>Step 2 — Build the native messaging host</H3>
               <CodeBlock>{`$ cargo build --release -p bolt-nmh`}</CodeBlock>
