@@ -22,6 +22,9 @@ chrome.downloads.onCreated.addListener((downloadItem) => {
 
   if (fallbackUrls.delete(url)) return;
 
+  const age = Date.now() - new Date(downloadItem.startTime).getTime();
+  if (age > 5000) return;
+
   interceptedIds.add(downloadItem.id);
   setTimeout(() => interceptedIds.delete(downloadItem.id), 10000);
 
