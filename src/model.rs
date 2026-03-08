@@ -151,14 +151,25 @@ pub struct PersistedDownload {
 }
 
 #[derive(Debug, Clone)]
+pub struct ResolvedFileInfo {
+    pub filename: String,
+    pub total_size: Option<u64>,
+    pub resumable: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct PendingDownload {
     pub url: String,
     pub filename: Option<String>,
     pub headers: HashMap<String, String>,
+    pub resolved: Option<ResolvedFileInfo>,
 }
 
 impl PendingDownload {
     pub fn display_filename(&self) -> String {
+        if let Some(ref info) = self.resolved {
+            return info.filename.clone();
+        }
         if let Some(ref name) = self.filename {
             if !name.is_empty() {
                 return name.clone();

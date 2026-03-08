@@ -1,6 +1,7 @@
 use crate::download::worker::download_segment;
 use crate::model::{
-    DownloadItem, DownloadStatus, FileCategory, PersistedSegment, SegmentInfo, SpeedTracker,
+    DownloadItem, DownloadStatus, FileCategory, PersistedSegment, ResolvedFileInfo, SegmentInfo,
+    SpeedTracker,
 };
 use crate::settings::DownloadDatabase;
 use anyhow::{anyhow, Result};
@@ -212,24 +213,22 @@ impl DownloadEngine {
         self.add_download_with_headers(url, save_dir, None).await
     }
 
-    pub async fn add_download_with_headers(
-        self: &Arc<Self>,
-        url: String,
-        save_dir: PathBuf,
-        headers: Option<HashMap<String, String>>,
-    ) -> Result<DownloadItem> {
-        let hdrs = headers.unwrap_or_default();
+    pub async fn resolve_file_info(
+        &self,
+        url: &str,
+        headers: &HashMap<String, String>,
+    ) -> Result<ResolvedFileInfo> {
         let client = self.client.lock().unwrap().clone();
 
-        let mut head_req = client.head(&url);
-        for (k, v) in &hdrs {
+        let mut head_req = client.head(url);
+        for (k, v) in headers {
             head_req = head_req.header(k.as_str(), v.as_str());
         }
         let response = match head_req.send().await {
             Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => resp,
             _ => {
-                let mut get_req = client.get(&url);
-                for (k, v) in &hdrs {
+                let mut get_req = client.get(url);
+                for (k, v) in headers {
                     get_req = get_req.header(k.as_str(), v.as_str());
                 }
                 get_req.send().await?
@@ -256,16 +255,32 @@ impl DownloadEngine {
             .map(|v| v.contains("bytes"))
             .unwrap_or(false);
 
-        let filename = extract_filename(&response, &url);
-        let category = FileCategory::from_filename(&filename);
+        let filename = extract_filename(&response, url);
+
+        Ok(ResolvedFileInfo {
+            filename,
+            total_size,
+            resumable,
+        })
+    }
+
+    pub async fn add_download_resolved(
+        self: &Arc<Self>,
+        url: String,
+        save_dir: PathBuf,
+        headers: Option<HashMap<String, String>>,
+        info: ResolvedFileInfo,
+    ) -> Result<DownloadItem> {
+        let hdrs = headers.unwrap_or_default();
+        let category = FileCategory::from_filename(&info.filename);
 
         tokio::fs::create_dir_all(&save_dir).await?;
 
-        let save_path = save_dir.join(&filename);
+        let save_path = save_dir.join(&info.filename);
         let id = Uuid::new_v4();
 
-        let num_segments = calc_segment_count(total_size, resumable);
-        let segments = create_segments(total_size, num_segments);
+        let num_segments = calc_segment_count(info.total_size, info.resumable);
+        let segments = create_segments(info.total_size, num_segments);
 
         let segment_states: Vec<SegmentState> = segments
             .iter()
@@ -282,28 +297,28 @@ impl DownloadEngine {
         let snapshot = build_snapshot(
             id,
             &url,
-            &filename,
+            &info.filename,
             &save_path,
-            total_size,
+            info.total_size,
             DownloadStatus::Queued,
             &segment_states,
             0.0,
             category,
             None,
-            resumable,
+            info.resumable,
         );
 
         let managed = ManagedDownload {
             id,
             url,
-            filename,
+            filename: info.filename,
             save_path,
-            total_size,
+            total_size: info.total_size,
             status: DownloadStatus::Queued,
             segments: segment_states,
             category,
             error: None,
-            resumable,
+            resumable: info.resumable,
             pause_flag,
             cancel_flag,
             speed_tracker: SpeedTracker::new(),
@@ -314,6 +329,18 @@ impl DownloadEngine {
 
         self.state.lock().unwrap().push(managed);
         Ok(snapshot)
+    }
+
+    pub async fn add_download_with_headers(
+        self: &Arc<Self>,
+        url: String,
+        save_dir: PathBuf,
+        headers: Option<HashMap<String, String>>,
+    ) -> Result<DownloadItem> {
+        let hdrs = headers.clone().unwrap_or_default();
+        let info = self.resolve_file_info(&url, &hdrs).await?;
+        self.add_download_resolved(url, save_dir, headers, info)
+            .await
     }
 
     pub async fn start_download(self: &Arc<Self>, id: Uuid) -> Result<()> {

@@ -87,39 +87,60 @@ fn create_icon_rgba() -> Vec<u8> {
     let mut data = vec![0u8; (size * size * 4) as usize];
     let cx = size as f32 / 2.0;
     let cy = size as f32 / 2.0;
-    let r_outer = 14.0f32;
-    let r_inner = 11.0f32;
+    let r = 15.5f32;
+
+    // Lightning bolt polygon (from extension SVG scaled 48→32)
+    let bolt: &[(f32, f32)] = &[
+        (18.0, 4.0),
+        (10.0, 18.0),
+        (15.0, 18.0),
+        (13.0, 28.0),
+        (21.0, 14.0),
+        (16.0, 14.0),
+    ];
 
     for y in 0..size {
         for x in 0..size {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            let dist = (dx * dx + dy * dy).sqrt();
             let idx = (y * size + x) as usize * 4;
+            let fx = x as f32 + 0.5;
+            let fy = y as f32 + 0.5;
+            let dx = fx - cx;
+            let dy = fy - cy;
 
-            if dist <= r_outer {
-                data[idx] = 0xE6;
-                data[idx + 1] = 0xA8;
-                data[idx + 2] = 0x17;
-                data[idx + 3] = 0xFF;
+            if dx * dx + dy * dy > r * r {
+                continue;
             }
 
-            if dist <= r_inner {
-                let bx = x as i32;
-                let by = y as i32;
-                let is_bolt = ((7..=15).contains(&by) && (14..=19).contains(&bx))
-                    || ((12..=16).contains(&by) && (12..=20).contains(&bx))
-                    || ((16..=24).contains(&by) && (13..=18).contains(&bx));
-
-                if is_bolt {
-                    data[idx] = 0x1A;
-                    data[idx + 1] = 0x1A;
-                    data[idx + 2] = 0x2E;
-                    data[idx + 3] = 0xFF;
-                }
+            if point_in_polygon(fx, fy, bolt) {
+                // Black bolt: #1A1A1A
+                data[idx] = 0x1A;
+                data[idx + 1] = 0x1A;
+                data[idx + 2] = 0x1A;
+                data[idx + 3] = 0xFF;
+            } else {
+                // Gold background: #F2BF40
+                data[idx] = 0xF2;
+                data[idx + 1] = 0xBF;
+                data[idx + 2] = 0x40;
+                data[idx + 3] = 0xFF;
             }
         }
     }
 
     data
+}
+
+fn point_in_polygon(px: f32, py: f32, poly: &[(f32, f32)]) -> bool {
+    let mut inside = false;
+    let n = poly.len();
+    let mut j = n - 1;
+    for i in 0..n {
+        let (xi, yi) = poly[i];
+        let (xj, yj) = poly[j];
+        if ((yi > py) != (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
 }

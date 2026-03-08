@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use uuid::Uuid;
 
-const NETWORK_CHECK_INTERVAL: u32 = 30;
+const NETWORK_CHECK_INTERVAL: u32 = 12;
 
 pub struct BoltApp {
     engine: Arc<DownloadEngine>,
@@ -58,6 +58,8 @@ pub struct BoltApp {
 
 impl BoltApp {
     pub fn boot() -> (Self, Task<Message>) {
+        crate::nmh::auto_install();
+
         let settings = AppSettings::load();
         let engine = Arc::new(DownloadEngine::new());
 
@@ -149,6 +151,7 @@ impl BoltApp {
             network_check_counter: 0,
             network_client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(5))
+                .pool_max_idle_per_host(0)
                 .build()
                 .unwrap_or_default(),
             history,
@@ -385,17 +388,32 @@ impl BoltApp {
                     if !new_pending.is_empty() {
                         let mut tasks = Vec::new();
                         for p in new_pending {
-                            let (id, open_task) = window::open(window::Settings {
-                                size: iced::Size::new(520.0, 300.0),
-                                min_size: Some(iced::Size::new(520.0, 300.0)),
-                                max_size: Some(iced::Size::new(520.0, 300.0)),
+                            let (win_id, open_task) = window::open(window::Settings {
+                                size: iced::Size::new(620.0, 210.0),
+                                min_size: Some(iced::Size::new(620.0, 210.0)),
+                                max_size: Some(iced::Size::new(620.0, 210.0)),
                                 resizable: false,
                                 level: window::Level::AlwaysOnTop,
                                 exit_on_close_request: false,
                                 ..Default::default()
                             });
-                            self.popup_windows.insert(id, p);
+                            let engine = self.engine.clone();
+                            let url = p.url.clone();
+                            let hdrs = p.headers.clone();
+                            let resolve_task = Task::perform(
+                                async move {
+                                    match engine.resolve_file_info(&url, &hdrs).await {
+                                        Ok(info) => {
+                                            Message::IpcResolved(win_id, Box::new(info))
+                                        }
+                                        Err(_) => Message::Noop,
+                                    }
+                                },
+                                |msg| msg,
+                            );
+                            self.popup_windows.insert(win_id, p);
                             tasks.push(open_task.map(|_| Message::Noop));
+                            tasks.push(resolve_task);
                         }
                         return Task::batch(tasks);
                     }
@@ -855,8 +873,16 @@ impl BoltApp {
                 Task::none()
             }
 
+            Message::IpcResolved(popup_id, info) => {
+                if let Some(pending) = self.popup_windows.get_mut(&popup_id) {
+                    pending.resolved = Some(*info);
+                }
+                Task::none()
+            }
+
             Message::IpcAcceptStart(popup_id) => {
                 if let Some(pending) = self.popup_windows.remove(&popup_id) {
+                    self.adding = true;
                     let engine = self.engine.clone();
                     let save_dir = self.settings.download_dir.clone();
                     let headers = if pending.headers.is_empty() {
@@ -864,8 +890,24 @@ impl BoltApp {
                     } else {
                         Some(pending.headers)
                     };
-                    return Task::batch([
-                        window::close(popup_id),
+                    let add_task = if let Some(info) = pending.resolved {
+                        Task::perform(
+                            async move {
+                                match engine
+                                    .add_download_resolved(pending.url, save_dir, headers, info)
+                                    .await
+                                {
+                                    Ok(item) => {
+                                        let id = item.id;
+                                        let _ = engine.start_download(id).await;
+                                        Message::DownloadAdded(Box::new(item))
+                                    }
+                                    Err(e) => Message::DownloadError(e.to_string()),
+                                }
+                            },
+                            |msg| msg,
+                        )
+                    } else {
                         Task::perform(
                             async move {
                                 match engine
@@ -881,7 +923,13 @@ impl BoltApp {
                                 }
                             },
                             |msg| msg,
-                        ),
+                        )
+                    };
+                    return Task::batch([
+                        window::close(popup_id),
+                        window::set_mode(self.main_window.unwrap(), window::Mode::Windowed),
+                        window::gain_focus(self.main_window.unwrap()),
+                        add_task,
                     ]);
                 }
                 Task::none()
@@ -889,6 +937,7 @@ impl BoltApp {
 
             Message::IpcAcceptQueue(popup_id) => {
                 if let Some(pending) = self.popup_windows.remove(&popup_id) {
+                    self.adding = true;
                     let engine = self.engine.clone();
                     let save_dir = self.settings.download_dir.clone();
                     let headers = if pending.headers.is_empty() {
@@ -896,8 +945,20 @@ impl BoltApp {
                     } else {
                         Some(pending.headers)
                     };
-                    return Task::batch([
-                        window::close(popup_id),
+                    let add_task = if let Some(info) = pending.resolved {
+                        Task::perform(
+                            async move {
+                                match engine
+                                    .add_download_resolved(pending.url, save_dir, headers, info)
+                                    .await
+                                {
+                                    Ok(item) => Message::DownloadAdded(Box::new(item)),
+                                    Err(e) => Message::DownloadError(e.to_string()),
+                                }
+                            },
+                            |msg| msg,
+                        )
+                    } else {
                         Task::perform(
                             async move {
                                 match engine
@@ -909,7 +970,13 @@ impl BoltApp {
                                 }
                             },
                             |msg| msg,
-                        ),
+                        )
+                    };
+                    return Task::batch([
+                        window::close(popup_id),
+                        window::set_mode(self.main_window.unwrap(), window::Mode::Windowed),
+                        window::gain_focus(self.main_window.unwrap()),
+                        add_task,
                     ]);
                 }
                 Task::none()

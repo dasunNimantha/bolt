@@ -1,6 +1,8 @@
 const NATIVE_HOST = "com.bolt.nmh";
 
 let interceptEnabled = true;
+const interceptedIds = new Set();
+const fallbackUrls = new Set();
 
 chrome.storage.local.get({ enabled: true }, (data) => {
   interceptEnabled = data.enabled;
@@ -12,52 +14,49 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-// Fires before the save-as dialog — cancel here to suppress the dialog.
-// Does NOT send to Bolt (onCreated handles that).
-chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
-  if (!interceptEnabled) {
-    suggest();
-    return;
-  }
-
-  const url = downloadItem.finalUrl || downloadItem.url;
-  if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    suggest();
-    return;
-  }
-
-  chrome.downloads.cancel(downloadItem.id);
-  chrome.downloads.erase({ id: downloadItem.id });
-  // deliberately not calling suggest() — pauses Chrome's UI
-});
-
-// Fires first in the download lifecycle — this is where we send to Bolt.
 chrome.downloads.onCreated.addListener((downloadItem) => {
   if (!interceptEnabled) return;
 
   const url = downloadItem.finalUrl || downloadItem.url;
   if (!url.startsWith("http://") && !url.startsWith("https://")) return;
 
-  chrome.downloads.cancel(downloadItem.id);
-  chrome.downloads.erase({ id: downloadItem.id });
+  if (fallbackUrls.delete(url)) return;
 
-  const filename = extractFilename(downloadItem.filename);
-  const referrer = downloadItem.referrer || null;
+  interceptedIds.add(downloadItem.id);
+  setTimeout(() => interceptedIds.delete(downloadItem.id), 10000);
 
-  gatherAndSend(url, filename, referrer);
+  gatherAndSend(
+    url,
+    extractFilename(downloadItem.filename),
+    downloadItem.referrer || null,
+  );
+});
+
+chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
+  if (interceptedIds.delete(downloadItem.id)) {
+    const dlId = downloadItem.id;
+    suggest({ filename: downloadItem.filename });
+    chrome.downloads.cancel(dlId, () => {
+      const _err = chrome.runtime.lastError;
+      chrome.downloads.erase({ id: dlId }, () => {
+        const _err2 = chrome.runtime.lastError;
+      });
+    });
+    return;
+  }
+  suggest();
 });
 
 async function gatherAndSend(url, filename, referrer) {
   let cookies = null;
   try {
-    const urlObj = new URL(url);
-    const cookieList = await chrome.cookies.getAll({ domain: urlObj.hostname });
-    if (cookieList.length > 0) {
+    const cookieList = await chrome.cookies.getAll({
+      domain: new URL(url).hostname,
+    });
+    if (cookieList.length) {
       cookies = cookieList.map((c) => `${c.name}=${c.value}`).join("; ");
     }
-  } catch (_) {
-    // Ignore cookie errors
-  }
+  } catch (_) {}
 
   const message = { url };
   if (filename) message.filename = filename;
@@ -65,33 +64,32 @@ async function gatherAndSend(url, filename, referrer) {
   if (cookies) message.cookies = cookies;
 
   chrome.runtime.sendNativeMessage(NATIVE_HOST, message, (response) => {
-    if (chrome.runtime.lastError) {
-      console.error("Bolt native messaging error:", chrome.runtime.lastError.message);
-      setBadge("!", "#f44336");
-      return;
-    }
-
-    if (response && response.status === "ok") {
+    if (chrome.runtime.lastError || (response && response.status === "error")) {
+      fallbackToChrome(url);
+    } else if (response && response.status === "ok") {
       setBadge("\u2713", "#4CAF50");
     } else {
-      const errMsg = response?.message || "Unknown error";
-      console.error("Bolt error:", errMsg);
       setBadge("!", "#f44336");
     }
+  });
+}
+
+function fallbackToChrome(url) {
+  fallbackUrls.add(url);
+  setTimeout(() => fallbackUrls.delete(url), 30000);
+  chrome.downloads.download({ url }, () => {
+    const _err = chrome.runtime.lastError;
   });
 }
 
 function extractFilename(path) {
   if (!path) return null;
   const parts = path.replace(/\\/g, "/").split("/");
-  const name = parts[parts.length - 1];
-  return name || null;
+  return parts[parts.length - 1] || null;
 }
 
 function setBadge(text, color) {
   chrome.action.setBadgeText({ text });
   chrome.action.setBadgeBackgroundColor({ color });
-  setTimeout(() => {
-    chrome.action.setBadgeText({ text: "" });
-  }, 3000);
+  setTimeout(() => chrome.action.setBadgeText({ text: "" }), 3000);
 }

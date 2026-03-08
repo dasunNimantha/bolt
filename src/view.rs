@@ -21,7 +21,7 @@ use iced_fonts::bootstrap as bs;
 const JETBRAINS_MONO: Font = Font::with_name("JetBrains Mono");
 
 fn icon(f: fn() -> iced::widget::Text<'static>) -> iced::widget::Text<'static> {
-    f().size(16.0)
+    f().size(17.0)
 }
 
 fn icon_sized(f: fn() -> iced::widget::Text<'static>, size: f32) -> iced::widget::Text<'static> {
@@ -135,7 +135,7 @@ fn build_header(
             row![
                 icon(bs::arrow_left),
                 Space::new().width(6),
-                text("Back").size(13),
+                text("Back").size(14),
             ]
             .align_y(Alignment::Center),
         )
@@ -146,9 +146,9 @@ fn build_header(
 
     container(
         row![
-            icon_sized(bs::lightning_charge_fill, 24.0).color(colors.accent_primary),
+            icon_sized(bs::lightning_charge_fill, 26.0).color(colors.accent_primary),
             Space::new().width(10),
-            text("Bolt").size(22).color(colors.text_primary),
+            text("Bolt").size(24).color(colors.text_primary),
             Space::new().width(Length::Fill),
             nav_button,
         ]
@@ -187,8 +187,8 @@ pub fn build_popup_window_view<'a>(
 
     let title_row = row![
         icon_sized(bs::download, 20.0).color(colors.accent_primary),
-        Space::new().width(10),
-        text("New Download").size(18).color(colors.text_primary),
+        Space::new().width(8),
+        text("New Download").size(17).color(colors.text_primary),
     ]
     .align_y(Alignment::Center);
 
@@ -203,14 +203,26 @@ pub fn build_popup_window_view<'a>(
             ..Default::default()
         });
 
+    let size_label: Element<'a, Message> = if let Some(ref info) = pending.resolved {
+        if let Some(size) = info.total_size {
+            text(format_bytes(size)).size(12).color(colors.text_secondary).into()
+        } else {
+            text("Unknown size").size(12).color(colors.text_disabled).into()
+        }
+    } else {
+        text("Resolving...").size(12).color(colors.text_disabled).into()
+    };
+
     let file_row = row![
         icon(category_icon).color(colors.accent_primary),
-        Space::new().width(10),
-        text(truncate_filename(&filename, 50))
+        Space::new().width(8),
+        text(truncate_filename(&filename, 60))
             .size(14)
             .color(colors.text_primary),
         Space::new().width(Length::Fill),
-        container(text(category.label()).size(10))
+        size_label,
+        Space::new().width(8),
+        container(text(category.label()).size(11))
             .padding([2, 8])
             .style(status_badge_style(colors.accent_primary)),
     ]
@@ -218,16 +230,16 @@ pub fn build_popup_window_view<'a>(
 
     let url_row = row![
         icon(bs::link).color(colors.text_disabled),
-        Space::new().width(10),
+        Space::new().width(8),
         text(url_display).size(12).color(colors.text_secondary),
     ]
     .align_y(Alignment::Center);
 
     let dir_row = row![
         icon(bs::folder).color(colors.text_disabled),
-        Space::new().width(10),
+        Space::new().width(8),
         text("Save to:").size(12).color(colors.text_secondary),
-        Space::new().width(6),
+        Space::new().width(4),
         text(dir_display).size(12).color(colors.text_primary),
     ]
     .align_y(Alignment::Center);
@@ -235,37 +247,37 @@ pub fn build_popup_window_view<'a>(
     let start_btn = button(
         row![
             icon(bs::play_fill).color(Color::from_rgb(0.1, 0.1, 0.1)),
-            Space::new().width(6),
+            Space::new().width(5),
             text("Start Download").size(13),
         ]
         .align_y(Alignment::Center),
     )
     .on_press(Message::IpcAcceptStart(popup_id))
-    .padding([10, 20])
+    .padding([7, 16])
     .style(primary_button(colors));
 
     let queue_btn = button(
         row![
             icon(bs::plus).size(14),
-            Space::new().width(6),
+            Space::new().width(5),
             text("Add to Queue").size(13),
         ]
         .align_y(Alignment::Center),
     )
     .on_press(Message::IpcAcceptQueue(popup_id))
-    .padding([10, 20])
+    .padding([7, 16])
     .style(secondary_button(colors));
 
     let cancel_btn = button(
         row![
             icon(bs::x_lg).size(12),
-            Space::new().width(6),
+            Space::new().width(5),
             text("Cancel").size(13),
         ]
         .align_y(Alignment::Center),
     )
     .on_press(Message::IpcDismiss(popup_id))
-    .padding([10, 20])
+    .padding([7, 16])
     .style(danger_button(colors));
 
     let button_row = row![
@@ -280,15 +292,15 @@ pub fn build_popup_window_view<'a>(
 
     let content = column![
         title_row,
-        Space::new().height(12),
+        Space::new().height(8),
         divider,
-        Space::new().height(16),
+        Space::new().height(8),
         file_row,
-        Space::new().height(10),
+        Space::new().height(4),
         url_row,
-        Space::new().height(10),
+        Space::new().height(4),
         dir_row,
-        Space::new().height(24),
+        Space::new().height(12),
         button_row,
     ]
     .width(Length::Fill);
@@ -296,7 +308,7 @@ pub fn build_popup_window_view<'a>(
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-        .padding([24, 28])
+        .padding([16, 22])
         .style(move |_theme: &Theme| container::Style {
             text_color: Some(colors.text_primary),
             background: Some(Background::Color(colors.bg_primary)),
@@ -356,7 +368,7 @@ fn build_downloads_view<'a>(
                     icon(bs::hourglass_split).color(colors.accent_primary),
                     Space::new().width(10),
                     text("Fetching file info...")
-                        .size(13)
+                        .size(14)
                         .color(colors.accent_primary),
                 ]
                 .align_y(Alignment::Center),
@@ -383,7 +395,7 @@ fn build_downloads_view<'a>(
                 row![
                     icon(bs::exclamation_triangle_fill).color(colors.error),
                     Space::new().width(8),
-                    text(err).size(13).color(colors.error),
+                    text(err).size(14).color(colors.error),
                 ]
                 .align_y(Alignment::Center),
             )
@@ -412,7 +424,7 @@ fn build_downloads_view<'a>(
                     text(
                         "Network offline — downloads will auto-resume when connection is restored"
                     )
-                    .size(12)
+                    .size(13)
                     .color(colors.warning),
                 ]
                 .align_y(Alignment::Center),
@@ -496,7 +508,7 @@ fn build_settings_view<'a>(
                                 ThemeMode::System => bs::display as fn() -> _,
                             }),
                             Space::new().width(6),
-                            text(settings.theme_mode.label()).size(13),
+                            text(settings.theme_mode.label()).size(14),
                         ]
                         .align_y(Alignment::Center),
                     )
@@ -512,9 +524,9 @@ fn build_settings_view<'a>(
                     "Download directory",
                     button(
                         row![
-                            icon(bs::folder_symlink).size(13),
+                            icon(bs::folder_symlink).size(14),
                             Space::new().width(6),
-                            text("Change").size(13),
+                            text("Change").size(14),
                         ]
                         .align_y(Alignment::Center),
                     )
@@ -540,11 +552,11 @@ fn build_settings_view<'a>(
                         text_input("3", max_concurrent_input)
                             .on_input(Message::SetMaxConcurrent)
                             .padding([6, 10])
-                            .size(13)
+                            .size(14)
                             .width(Length::Fixed(60.0))
                             .style(text_input_style(colors)),
                         Space::new().width(8),
-                        text("1 – 10").size(11).color(colors.text_disabled),
+                        text("1 – 10").size(12).color(colors.text_disabled),
                     ]
                     .align_y(Alignment::Center)
                     .into(),
@@ -558,14 +570,14 @@ fn build_settings_view<'a>(
                         text_input("Unlimited", speed_limit_input)
                             .on_input(Message::SetSpeedLimit)
                             .padding([6, 10])
-                            .size(13)
+                            .size(14)
                             .width(Length::Fixed(100.0))
                             .style(text_input_style(colors)),
                         Space::new().width(6),
-                        text("KB/s").size(12).color(colors.text_disabled),
+                        text("KB/s").size(13).color(colors.text_disabled),
                         Space::new().width(8),
                         if !speed_limit_input.is_empty() {
-                            button(icon(bs::x_lg).size(11))
+                            button(icon(bs::x_lg).size(12))
                                 .on_press(Message::ClearSpeedLimit)
                                 .padding([4, 6])
                                 .style(icon_button(colors))
@@ -584,10 +596,10 @@ fn build_settings_view<'a>(
         .push(
             container(
                 row![
-                    icon(bs::info_circle).size(12).color(colors.text_disabled),
+                    icon(bs::info_circle).size(13).color(colors.text_disabled),
                     Space::new().width(8),
                     text("Speed limit changes apply after pausing and resuming active downloads.")
-                        .size(11)
+                        .size(12)
                         .color(colors.text_disabled),
                 ]
                 .align_y(Alignment::Center),
@@ -615,7 +627,7 @@ fn build_settings_view<'a>(
                      -> iced::widget::TextInput<'a, Message> {
                         let mut inp = text_input(placeholder, value)
                             .padding([6, 6])
-                            .size(13)
+                            .size(14)
                             .width(Length::Fixed(36.0))
                             .style(text_input_style(colors));
                         if enabled {
@@ -631,9 +643,9 @@ fn build_settings_view<'a>(
                                 } else {
                                     bs::toggle_off as fn() -> _
                                 })
-                                .size(18),
+                                .size(20),
                                 Space::new().width(6),
-                                text(if enabled { "On" } else { "Off" }).size(13),
+                                text(if enabled { "On" } else { "Off" }).size(14),
                             ]
                             .align_y(Alignment::Center),
                         )
@@ -642,13 +654,13 @@ fn build_settings_view<'a>(
                         .style(secondary_button(colors)),
                         Space::new().width(14),
                         time_input("22", sched_from_h, Message::SetScheduleFromH),
-                        text(" : ").size(13).color(colon_color),
+                        text(" : ").size(14).color(colon_color),
                         time_input("00", sched_from_m, Message::SetScheduleFromM),
                         Space::new().width(12),
-                        text("–").size(16).color(colors.text_primary),
+                        text("–").size(17).color(colors.text_primary),
                         Space::new().width(12),
                         time_input("06", sched_to_h, Message::SetScheduleToH),
-                        text(" : ").size(13).color(colon_color),
+                        text(" : ").size(14).color(colon_color),
                         time_input("00", sched_to_m, Message::SetScheduleToM),
                     ]
                     .align_y(Alignment::Center)
@@ -662,14 +674,14 @@ fn build_settings_view<'a>(
         .push(
             container(
                 row![
-                    icon_sized(bs::lightning_charge_fill, 14.0).color(colors.text_disabled),
+                    icon_sized(bs::lightning_charge_fill, 15.0).color(colors.text_disabled),
                     Space::new().width(6),
-                    text("Bolt v0.1.0").size(11).color(colors.text_disabled),
+                    text("Bolt v0.1.0").size(12).color(colors.text_disabled),
                     Space::new().width(8),
-                    text("·").size(11).color(colors.text_disabled),
+                    text("·").size(12).color(colors.text_disabled),
                     Space::new().width(8),
                     text("Multi-threaded download manager")
-                        .size(11)
+                        .size(12)
                         .color(colors.text_disabled),
                 ]
                 .align_y(Alignment::Center),
@@ -703,7 +715,7 @@ fn build_proxy_settings<'a>(
         let mut r = Row::new().spacing(4).align_y(Alignment::Center);
         for pt in ProxyType::ALL {
             let is_selected = pt == active_type;
-            let btn = button(text(pt.label()).size(12).color(if is_selected {
+            let btn = button(text(pt.label()).size(13).color(if is_selected {
                 Color::from_rgb(0.1, 0.1, 0.1)
             } else {
                 colors.text_secondary
@@ -749,16 +761,16 @@ fn build_proxy_settings<'a>(
                 text_input("Host", proxy_host)
                     .on_input(Message::SetProxyHost)
                     .padding([6, 10])
-                    .size(13)
+                    .size(14)
                     .width(Length::Fixed(150.0))
                     .style(text_input_style(colors)),
                 Space::new().width(6),
-                text(":").size(13).color(colors.text_disabled),
+                text(":").size(14).color(colors.text_disabled),
                 Space::new().width(6),
                 text_input("Port", proxy_port)
                     .on_input(Message::SetProxyPort)
                     .padding([6, 10])
-                    .size(13)
+                    .size(14)
                     .width(Length::Fixed(70.0))
                     .style(text_input_style(colors)),
             ]
@@ -775,14 +787,14 @@ fn build_proxy_settings<'a>(
                 text_input("Username", proxy_user)
                     .on_input(Message::SetProxyUser)
                     .padding([6, 10])
-                    .size(13)
+                    .size(14)
                     .width(Length::Fixed(120.0))
                     .style(text_input_style(colors)),
                 Space::new().width(8),
                 text_input("Password", proxy_pass)
                     .on_input(Message::SetProxyPass)
                     .padding([6, 10])
-                    .size(13)
+                    .size(14)
                     .width(Length::Fixed(120.0))
                     .style(text_input_style(colors))
                     .secure(true),
@@ -796,9 +808,9 @@ fn build_proxy_settings<'a>(
         let test_btn: Element<'a, Message> = if proxy_testing {
             button(
                 row![
-                    icon(bs::arrow_repeat).size(14),
+                    icon(bs::arrow_repeat).size(15),
                     Space::new().width(5),
-                    text("Testing...").size(13),
+                    text("Testing...").size(14),
                 ]
                 .align_y(Alignment::Center),
             )
@@ -808,9 +820,9 @@ fn build_proxy_settings<'a>(
         } else {
             button(
                 row![
-                    icon(bs::wifi).size(14),
+                    icon(bs::wifi).size(15),
                     Space::new().width(5),
-                    text("Test Connection").size(13),
+                    text("Test Connection").size(14),
                 ]
                 .align_y(Alignment::Center),
             )
@@ -837,9 +849,9 @@ fn build_proxy_settings<'a>(
                 }
             };
             row![
-                icon(result_icon).size(13).color(result_color),
+                icon(result_icon).size(14).color(result_color),
                 Space::new().width(5),
-                text(result_text).size(12).color(result_color),
+                text(result_text).size(13).color(result_color),
                 Space::new().width(Length::Fill),
                 test_btn,
             ]
@@ -873,7 +885,7 @@ fn settings_group<'a>(
     let mut col = Column::new().spacing(0).width(Length::Fill);
 
     col = col.push(
-        container(text(title).size(11).color(colors.text_disabled)).padding(iced::Padding {
+        container(text(title).size(12).color(colors.text_disabled)).padding(iced::Padding {
             top: 0.0,
             right: 4.0,
             bottom: 6.0,
@@ -908,15 +920,15 @@ fn settings_row<'a>(
 ) -> Element<'a, Message> {
     let label_col: Element<'a, Message> = if let Some(desc) = description {
         column![
-            text(label).size(13).color(colors.text_primary),
-            text(desc).size(11).color(colors.text_disabled),
+            text(label).size(14).color(colors.text_primary),
+            text(desc).size(12).color(colors.text_disabled),
         ]
         .spacing(2)
         .width(Length::Fill)
         .into()
     } else {
         text(label)
-            .size(13)
+            .size(14)
             .width(Length::Fill)
             .color(colors.text_primary)
             .into()
@@ -952,7 +964,7 @@ fn build_search_bar<'a>(search_query: &'a str, colors: ColorScheme) -> Element<'
         text_input("Search...", search_query)
             .on_input(Message::SearchChanged)
             .padding([6, 10])
-            .size(12)
+            .size(13)
             .width(Length::Fixed(180.0))
             .icon(text_input::Icon {
                 font: iced_fonts::BOOTSTRAP_FONT,
@@ -974,14 +986,14 @@ fn build_url_bar<'a>(url_input: &str, colors: ColorScheme, adding: bool) -> Elem
     let input = if adding {
         text_input("Adding download...", url_input)
             .padding([10, 14])
-            .size(14)
+            .size(15)
             .style(text_input_style(colors))
     } else {
         text_input("Paste URL(s) – one per line for batch", url_input)
             .on_input(Message::UrlInputChanged)
             .on_submit(Message::AddDownload)
             .padding([10, 14])
-            .size(14)
+            .size(15)
             .style(text_input_style(colors))
     };
 
@@ -998,7 +1010,7 @@ fn build_url_bar<'a>(url_input: &str, colors: ColorScheme, adding: bool) -> Elem
             row![
                 icon(bs::arrow_repeat).color(Color::from_rgb(0.1, 0.1, 0.1)),
                 Space::new().width(6),
-                text(add_label).size(14),
+                text(add_label).size(15),
             ]
             .align_y(Alignment::Center),
         )
@@ -1009,7 +1021,7 @@ fn build_url_bar<'a>(url_input: &str, colors: ColorScheme, adding: bool) -> Elem
             row![
                 icon(bs::download).color(Color::from_rgb(0.1, 0.1, 0.1)),
                 Space::new().width(6),
-                text(add_label).size(14),
+                text(add_label).size(15),
             ]
             .align_y(Alignment::Center),
         )
@@ -1021,7 +1033,7 @@ fn build_url_bar<'a>(url_input: &str, colors: ColorScheme, adding: bool) -> Elem
             row![
                 icon(bs::download).color(colors.text_disabled),
                 Space::new().width(6),
-                text(add_label).size(14),
+                text(add_label).size(15),
             ]
             .align_y(Alignment::Center),
         )
@@ -1031,9 +1043,9 @@ fn build_url_bar<'a>(url_input: &str, colors: ColorScheme, adding: bool) -> Elem
 
     let import_button = button(
         row![
-            icon(bs::file_earmark_arrow_up).size(14),
+            icon(bs::file_earmark_arrow_up).size(15),
             Space::new().width(4),
-            text("Import").size(13),
+            text("Import").size(14),
         ]
         .align_y(Alignment::Center),
     )
@@ -1084,7 +1096,7 @@ fn build_filter_bar(
     for (filter, label) in filters {
         let is_active = active_filter == filter;
         filter_row = filter_row.push(
-            button(text(label).size(12))
+            button(text(label).size(13))
                 .on_press(Message::FilterChanged(filter))
                 .padding([6, 14])
                 .style(filter_button(colors, is_active)),
@@ -1097,9 +1109,9 @@ fn build_filter_bar(
         filter_row = filter_row.push(
             button(
                 row![
-                    icon(bs::trash).size(12),
+                    icon(bs::trash).size(13),
                     Space::new().width(4),
-                    text("Clear Done").size(12),
+                    text("Clear Done").size(13),
                 ]
                 .align_y(Alignment::Center),
             )
@@ -1124,14 +1136,14 @@ fn build_download_list<'a>(
     if downloads.is_empty() {
         let empty = container(
             column![
-                icon_sized(bs::cloud_arrow_down, 48.0).color(colors.text_disabled),
+                icon_sized(bs::cloud_arrow_down, 52.0).color(colors.text_disabled),
                 Space::new().height(16),
                 text("No downloads yet")
-                    .size(16)
+                    .size(17)
                     .color(colors.text_secondary),
                 Space::new().height(6),
                 text("Paste a URL above to start downloading")
-                    .size(13)
+                    .size(14)
                     .color(colors.text_disabled),
             ]
             .align_x(Alignment::Center)
@@ -1192,9 +1204,9 @@ fn build_download_card<'a>(
     let name_and_status = row![
         icon(category_icon).color(colors.accent_primary),
         Space::new().width(8),
-        column![text(display_name).size(13).color(colors.text_primary),].width(Length::Fill),
+        column![text(display_name).size(14).color(colors.text_primary),].width(Length::Fill),
         Space::new().width(8),
-        container(text(status_text).size(10))
+        container(text(status_text).size(11))
             .padding([2, 8])
             .style(status_badge_style(status_color)),
         Space::new().width(4),
@@ -1230,7 +1242,7 @@ fn build_download_card<'a>(
 
     info = info.push(
         text(size_text)
-            .size(11)
+            .size(12)
             .font(JETBRAINS_MONO)
             .color(colors.text_secondary),
     );
@@ -1238,7 +1250,7 @@ fn build_download_card<'a>(
     if download.total_size.is_some() {
         info = info.push(
             text(format!("{:.1}%", progress_percent))
-                .size(11)
+                .size(12)
                 .font(JETBRAINS_MONO)
                 .color(colors.accent_primary),
         );
@@ -1249,14 +1261,14 @@ fn build_download_card<'a>(
     if download.status == DownloadStatus::Downloading {
         info = info.push(
             text(format_speed(download.speed))
-                .size(11)
+                .size(12)
                 .font(JETBRAINS_MONO)
                 .color(colors.info),
         );
         if let Some(eta) = download.eta_seconds() {
             info = info.push(
                 text(format_eta(eta))
-                    .size(11)
+                    .size(12)
                     .font(JETBRAINS_MONO)
                     .color(colors.text_disabled),
             );
@@ -1273,7 +1285,7 @@ fn build_download_card<'a>(
     if let Some(ref error) = download.error {
         card_content = card_content.push(
             text(format!("Error: {}", error))
-                .size(11)
+                .size(12)
                 .color(colors.error),
         );
     }
@@ -1402,41 +1414,41 @@ fn build_status_bar(
 
     container(
         row![
-            icon(bs::folder).size(12).color(colors.text_disabled),
+            icon(bs::folder).size(13).color(colors.text_disabled),
             Space::new().width(4),
-            button(text(dir_display).size(11).color(colors.text_secondary))
+            button(text(dir_display).size(12).color(colors.text_secondary))
                 .on_press(Message::ChooseDownloadDir)
                 .padding([2, 6])
                 .style(icon_button(colors)),
             Space::new().width(Length::Fill),
-            icon(net_icon).size(11).color(net_color),
+            icon(net_icon).size(12).color(net_color),
             Space::new().width(12),
             text(format!("{} downloads", total))
-                .size(12)
+                .size(13)
                 .color(colors.text_disabled),
             Space::new().width(16),
             if active > 0 {
                 text(format!("{} active", active))
-                    .size(12)
+                    .size(13)
                     .color(colors.info)
             } else {
-                text("").size(12)
+                text("").size(13)
             },
             Space::new().width(16),
             if completed > 0 {
                 text(format!("{} done", completed))
-                    .size(12)
+                    .size(13)
                     .color(colors.success)
             } else {
-                text("").size(12)
+                text("").size(13)
             },
             Space::new().width(16),
             if active > 0 {
                 row![
-                    icon(bs::speedometer).size(12).color(colors.accent_primary),
+                    icon(bs::speedometer).size(13).color(colors.accent_primary),
                     Space::new().width(4),
                     text(format_speed(total_speed))
-                        .size(12)
+                        .size(13)
                         .font(JETBRAINS_MONO)
                         .color(colors.accent_primary),
                 ]

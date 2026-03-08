@@ -110,6 +110,7 @@ fn process_request(line: &str, pending: &Arc<Mutex<Vec<PendingDownload>>>) -> Ip
         url: req.url,
         filename: req.filename,
         headers,
+        resolved: None,
     });
 
     IpcResponse {

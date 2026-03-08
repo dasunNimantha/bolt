@@ -64,6 +64,7 @@ pub enum Message {
     NetworkStatus(bool),
 
     // Browser integration popup (carries popup window id)
+    IpcResolved(iced::window::Id, Box<crate::model::ResolvedFileInfo>),
     IpcAcceptStart(iced::window::Id),
     IpcAcceptQueue(iced::window::Id),
     IpcDismiss(iced::window::Id),
