@@ -62,6 +62,7 @@ pub struct BoltApp {
     popup_windows: HashMap<window::Id, PendingDownload>,
     main_window: Option<window::Id>,
     system_is_dark: bool,
+    started_in_background: bool,
 }
 
 impl BoltApp {
@@ -176,6 +177,7 @@ impl BoltApp {
             popup_windows: HashMap::new(),
             main_window: Some(main_id),
             system_is_dark: true,
+            started_in_background: start_background,
         };
         app.refresh_snapshots();
 
@@ -388,6 +390,10 @@ impl BoltApp {
             Message::WindowOpened(id) => {
                 if self.main_window.is_none() {
                     self.main_window = Some(id);
+                    // Keep window hidden when started via autostart (--background)
+                    if self.started_in_background {
+                        return window::set_mode(id, window::Mode::Hidden);
+                    }
                 }
                 Task::none()
             }
