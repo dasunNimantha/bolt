@@ -94,7 +94,7 @@ mod platform {
     }
 
     pub fn is_enabled() -> bool {
-        plist_path().map_or(false, |p| p.exists())
+        plist_path().is_some_and(|p| p.exists())
     }
 }
 
