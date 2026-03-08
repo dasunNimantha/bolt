@@ -403,9 +403,7 @@ impl BoltApp {
                             let resolve_task = Task::perform(
                                 async move {
                                     match engine.resolve_file_info(&url, &hdrs).await {
-                                        Ok(info) => {
-                                            Message::IpcResolved(win_id, Box::new(info))
-                                        }
+                                        Ok(info) => Message::IpcResolved(win_id, Box::new(info)),
                                         Err(_) => Message::Noop,
                                     }
                                 },

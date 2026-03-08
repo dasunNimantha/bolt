@@ -205,12 +205,21 @@ pub fn build_popup_window_view<'a>(
 
     let size_label: Element<'a, Message> = if let Some(ref info) = pending.resolved {
         if let Some(size) = info.total_size {
-            text(format_bytes(size)).size(12).color(colors.text_secondary).into()
+            text(format_bytes(size))
+                .size(12)
+                .color(colors.text_secondary)
+                .into()
         } else {
-            text("Unknown size").size(12).color(colors.text_disabled).into()
+            text("Unknown size")
+                .size(12)
+                .color(colors.text_disabled)
+                .into()
         }
     } else {
-        text("Resolving...").size(12).color(colors.text_disabled).into()
+        text("Resolving...")
+            .size(12)
+            .color(colors.text_disabled)
+            .into()
     };
 
     let file_row = row![

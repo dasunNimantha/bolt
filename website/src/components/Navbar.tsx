@@ -30,9 +30,9 @@ export function Navbar() {
 
   return (
     <nav
-      className={`fixed top-0 left-0 right-0 z-50 transition-[background-color,box-shadow] duration-500 border-b ${
+      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 border-b ${
         scrolled
-          ? "glass border-white/[0.06] shadow-2xl shadow-black/30"
+          ? "bg-surface/80 backdrop-blur-xl border-white/[0.06] shadow-lg shadow-black/20"
           : "bg-transparent border-transparent"
       }`}
     >
@@ -67,7 +67,7 @@ export function Navbar() {
       </div>
 
       {mobileOpen && (
-        <div className="md:hidden glass border-b border-white/[0.06] px-6 pb-4 pt-1">
+        <div className="md:hidden bg-surface/80 backdrop-blur-xl border-b border-white/[0.06] px-6 pb-4 pt-1">
           {links.map((l) => (
             <div key={l.href} className="py-1">
               <NavLink {...l} onClick={() => setMobileOpen(false)} />
