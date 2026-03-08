@@ -409,6 +409,7 @@ impl BoltApp {
                                 min_size: Some(iced::Size::new(620.0, 210.0)),
                                 max_size: Some(iced::Size::new(620.0, 210.0)),
                                 resizable: false,
+                                position: window::Position::Centered,
                                 level: window::Level::AlwaysOnTop,
                                 exit_on_close_request: false,
                                 icon: Some(app_icon()),
