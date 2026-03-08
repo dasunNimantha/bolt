@@ -62,14 +62,14 @@ Load the extension in Chrome:
 ```bash
 # Debian/Ubuntu
 sudo apt install pkg-config libssl-dev libfontconfig-dev \
-  libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
+  libgtk-3-dev libayatana-appindicator3-dev
 
 # Fedora
 sudo dnf install pkg-config openssl-devel fontconfig-devel \
-  gtk3-devel libayatana-appindicator-gtk3-devel libxdo-devel
+  gtk3-devel libayatana-appindicator-gtk3-devel
 
 # Arch
-sudo pacman -S pkg-config openssl fontconfig gtk3 libayatana-appindicator libxdo
+sudo pacman -S pkg-config openssl fontconfig gtk3 libayatana-appindicator
 ```
 
 **Windows / macOS**: No extra system dependencies -- just Rust via `rustup`.

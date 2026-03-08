@@ -166,19 +166,19 @@ export function DocsPage() {
                   {
                     label: "Debian / Ubuntu",
                     content: (
-                      <CodeBlock>{`$ sudo apt install pkg-config libssl-dev libfontconfig-dev libgtk-3-dev libayatana-appindicator3-dev libxdo-dev`}</CodeBlock>
+                      <CodeBlock>{`$ sudo apt install pkg-config libssl-dev libfontconfig-dev libgtk-3-dev libayatana-appindicator3-dev`}</CodeBlock>
                     ),
                   },
                   {
                     label: "Fedora",
                     content: (
-                      <CodeBlock>{`$ sudo dnf install pkg-config openssl-devel fontconfig-devel gtk3-devel libayatana-appindicator-gtk3-devel libxdo-devel`}</CodeBlock>
+                      <CodeBlock>{`$ sudo dnf install pkg-config openssl-devel fontconfig-devel gtk3-devel libayatana-appindicator-gtk3-devel`}</CodeBlock>
                     ),
                   },
                   {
                     label: "Arch",
                     content: (
-                      <CodeBlock>{`$ sudo pacman -S pkg-config openssl fontconfig gtk3 libayatana-appindicator libxdo`}</CodeBlock>
+                      <CodeBlock>{`$ sudo pacman -S pkg-config openssl fontconfig gtk3 libayatana-appindicator`}</CodeBlock>
                     ),
                   },
                 ]}
