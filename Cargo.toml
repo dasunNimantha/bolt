@@ -2,7 +2,7 @@
 members = [".", "bolt-nmh"]
 
 [workspace.package]
-version = "0.3.1-beta"
+version = "0.3.2-beta"
 
 [package]
 name = "bolt"
