@@ -54,3 +54,28 @@ tray-icon = { version = "0.21", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
+
+[package.metadata.deb]
+name = "bolt-dm"
+maintainer = "Dasun P"
+section = "net"
+depends = "$auto"
+assets = [
+  ["target/release/bolt", "usr/bin/", "755"],
+  ["target/release/bolt-nmh", "usr/bin/", "755"],
+  ["dist/bolt.desktop", "usr/share/applications/", "644"],
+  ["dist/bolt.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+  { source = "target/release/bolt", dest = "/usr/bin/bolt", mode = "755" },
+  { source = "target/release/bolt-nmh", dest = "/usr/bin/bolt-nmh", mode = "755" },
+  { source = "dist/bolt.desktop", dest = "/usr/share/applications/bolt.desktop", mode = "644" },
+  { source = "dist/bolt.svg", dest = "/usr/share/icons/hicolor/scalable/apps/bolt.svg", mode = "644" },
+]
+
+[package.metadata.generate-rpm.requires]
+gtk3 = "*"
+openssl-libs = "*"
+fontconfig = "*"

@@ -1,0 +1,35 @@
+# Maintainer: Dasun P
+pkgname=bolt-dm-bin
+pkgver=0.3.0_beta
+pkgrel=1
+pkgdesc="Fast multi-segment download manager"
+arch=('x86_64')
+url="https://github.com/dasunNimantha/bolt"
+license=('MIT')
+depends=('gtk3' 'openssl' 'fontconfig')
+provides=('bolt-dm')
+conflicts=('bolt-dm')
+source=("${url}/releases/download/v${pkgver//_/-}/bolt-linux-x86_64")
+sha256sums=('SKIP')
+
+package() {
+    install -Dm755 "${srcdir}/bolt-linux-x86_64" "${pkgdir}/usr/bin/bolt"
+    install -Dm644 /dev/stdin "${pkgdir}/usr/share/applications/bolt.desktop" <<'EOF'
+[Desktop Entry]
+Name=Bolt
+Comment=Fast multi-segment download manager
+Exec=bolt
+Icon=bolt
+Terminal=false
+Type=Application
+Categories=Network;FileTransfer;GTK;
+Keywords=download;manager;accelerator;
+StartupWMClass=bolt
+EOF
+    install -Dm644 /dev/stdin "${pkgdir}/usr/share/icons/hicolor/scalable/apps/bolt.svg" <<'EOF'
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <rect width="48" height="48" rx="10" fill="#F2BF40"/>
+  <path d="M27 6L15 27h7.5l-3 15 12-21H24l3-15z" fill="#1A1A1A"/>
+</svg>
+EOF
+}

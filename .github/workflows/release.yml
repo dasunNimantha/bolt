@@ -60,6 +60,34 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
 
+      - name: Generate .deb package
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          cargo install cargo-deb
+          cargo deb --no-build --no-strip --target ${{ matrix.target }}
+
+      - name: Upload .deb artifact
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bolt-dm-deb
+          path: target/${{ matrix.target }}/debian/*.deb
+
+      - name: Generate .rpm package
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          cargo install cargo-generate-rpm
+          cp target/${{ matrix.target }}/release/bolt target/release/bolt
+          cp target/${{ matrix.target }}/release/bolt-nmh target/release/bolt-nmh
+          cargo generate-rpm
+
+      - name: Upload .rpm artifact
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bolt-dm-rpm
+          path: target/generate-rpm/*.rpm
+
   release:
     needs: build
     runs-on: ubuntu-latest
