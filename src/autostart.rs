@@ -23,14 +23,16 @@ mod platform {
                 let _ = fs::create_dir_all(parent);
             }
             let desktop_entry = format!(
-                "[Desktop Entry]\n\
-                 Type=Application\n\
-                 Name=Bolt\n\
-                 Comment=Multi-segment download manager\n\
-                 Exec={exe}\n\
-                 Terminal=false\n\
-                 StartupNotify=false\n\
-                 X-GNOME-Autostart-enabled=true\n",
+                "\
+[Desktop Entry]
+Type=Application
+Name=Bolt
+Comment=Multi-segment download manager
+Exec={exe}
+Terminal=false
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
+",
                 exe = exe.display()
             );
             let _ = fs::write(&path, desktop_entry);

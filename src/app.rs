@@ -98,6 +98,10 @@ impl BoltApp {
         let proxy_user = settings.proxy.username.clone();
         let proxy_pass = settings.proxy.password.clone();
 
+        if settings.autostart && !crate::autostart::is_enabled() {
+            crate::autostart::set_enabled(true);
+        }
+
         let tray = BoltTray::new();
         let history = DownloadHistory::load();
         let schedule_was_active = settings.schedule_enabled && settings.is_within_schedule();
