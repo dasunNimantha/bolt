@@ -1,6 +1,6 @@
 [package]
 name = "bolt-nmh"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 description = "Native messaging host for Bolt download manager browser extension"
 authors = ["Dasun P"]

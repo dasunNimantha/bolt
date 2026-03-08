@@ -1,9 +1,12 @@
 [workspace]
 members = [".", "bolt-nmh"]
 
+[workspace.package]
+version = "0.2.0-beta"
+
 [package]
 name = "bolt"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 description = "Bolt - Fast multi-segment download manager for Linux"
 authors = ["Dasun P"]

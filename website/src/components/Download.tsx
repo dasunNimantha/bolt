@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Download as DownloadIcon, Terminal, Apple, Monitor, ExternalLink } from "lucide-react";
+import { Download as DownloadIcon, Terminal, Apple, Monitor, ExternalLink, Loader2 } from "lucide-react";
 
 type Platform = "linux" | "macos" | "windows";
 
@@ -11,6 +11,11 @@ function detectPlatform(): Platform {
   return "linux";
 }
 
+function formatBytes(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  return `${mb.toFixed(1)} MB`;
+}
+
 const platforms: { id: Platform; label: string; icon: typeof Monitor }[] = [
   { id: "linux", label: "Linux", icon: Terminal },
   { id: "macos", label: "macOS", icon: Apple },
@@ -18,34 +23,60 @@ const platforms: { id: Platform; label: string; icon: typeof Monitor }[] = [
 ];
 
 const REPO = "dasunNimantha/bolt";
-const RELEASE_TAG = "v0.2.0";
 
-const downloadUrls: Record<Platform, { url: string; filename: string; size: string }> = {
-  linux: {
-    url: `https://github.com/${REPO}/releases/download/${RELEASE_TAG}/bolt-linux-x86_64`,
-    filename: "bolt-linux-x86_64",
-    size: "34.5 MB",
-  },
-  macos: {
-    url: `https://github.com/${REPO}/releases/download/${RELEASE_TAG}/bolt-macos-aarch64`,
-    filename: "bolt-macos-aarch64",
-    size: "18.8 MB",
-  },
-  windows: {
-    url: `https://github.com/${REPO}/releases/download/${RELEASE_TAG}/bolt-windows-x86_64.exe`,
-    filename: "bolt-windows-x86_64.exe",
-    size: "19.0 MB",
-  },
+const ASSET_PATTERNS: Record<Platform, RegExp> = {
+  linux: /^bolt-linux-x86_64$/,
+  macos: /^bolt-macos-aarch64$/,
+  windows: /^bolt-windows-x86_64\.exe$/,
 };
+
+interface Asset {
+  url: string;
+  filename: string;
+  size: string;
+}
+
+interface ReleaseInfo {
+  tag: string;
+  name: string;
+  assets: Record<Platform, Asset>;
+}
 
 export function Download() {
   const [platform, setPlatform] = useState<Platform>("linux");
+  const [release, setRelease] = useState<ReleaseInfo | null>(null);
 
   useEffect(() => {
     setPlatform(detectPlatform());
+
+    fetch(`https://api.github.com/repos/${REPO}/releases`)
+      .then((r) => r.json())
+      .then((releases: { tag_name: string; name: string; assets: { name: string; browser_download_url: string; size: number }[] }[]) => {
+        const latest = releases[0];
+        if (!latest) return;
+
+        const assets = {} as Record<Platform, Asset>;
+        for (const [plat, pattern] of Object.entries(ASSET_PATTERNS) as [Platform, RegExp][]) {
+          const match = latest.assets.find((a) => pattern.test(a.name));
+          if (match) {
+            assets[plat] = {
+              url: match.browser_download_url,
+              filename: match.name,
+              size: formatBytes(match.size),
+            };
+          }
+        }
+
+        setRelease({
+          tag: latest.tag_name,
+          name: latest.name || latest.tag_name,
+          assets,
+        });
+      })
+      .catch(() => {});
   }, []);
 
-  const dl = downloadUrls[platform];
+  const dl = release?.assets[platform];
 
   return (
     <section id="download" className="py-16 md:py-24 relative">
@@ -89,21 +120,34 @@ export function Download() {
 
           {/* Download button */}
           <div>
-            <motion.a
-              href={dl.url}
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.98 }}
-              className="group relative inline-flex items-center gap-3 px-10 py-4.5 bg-bolt text-black font-semibold text-lg rounded-2xl shadow-xl shadow-bolt/25 transition-shadow hover:shadow-2xl hover:shadow-bolt/35"
-            >
-              <DownloadIcon className="w-5 h-5 transition-transform group-hover:-translate-y-0.5" />
-              Download for {platforms.find((p) => p.id === platform)?.label}
-              <span className="absolute inset-0 rounded-2xl bg-white/0 group-hover:bg-white/10 transition-colors" />
-            </motion.a>
-            <p className="text-xs text-text-muted mt-4 font-mono">
-              {dl.filename} &middot; {dl.size} &middot; {RELEASE_TAG}
-            </p>
+            {!release ? (
+              <div className="flex items-center justify-center gap-2 text-text-muted text-sm py-4">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Loading latest release…
+              </div>
+            ) : dl ? (
+              <>
+                <motion.a
+                  href={dl.url}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="group relative inline-flex items-center gap-3 px-10 py-4.5 bg-bolt text-black font-semibold text-lg rounded-2xl shadow-xl shadow-bolt/25 transition-shadow hover:shadow-2xl hover:shadow-bolt/35"
+                >
+                  <DownloadIcon className="w-5 h-5 transition-transform group-hover:-translate-y-0.5" />
+                  Download for {platforms.find((p) => p.id === platform)?.label}
+                  <span className="absolute inset-0 rounded-2xl bg-white/0 group-hover:bg-white/10 transition-colors" />
+                </motion.a>
+                <p className="text-xs text-text-muted mt-4 font-mono">
+                  {dl.filename} &middot; {dl.size} &middot; {release.name}
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-text-muted">
+                No binary available for this platform yet.
+              </p>
+            )}
             <a
-              href={`https://github.com/${REPO}/releases/tag/${RELEASE_TAG}`}
+              href={`https://github.com/${REPO}/releases`}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 text-xs text-text-muted hover:text-bolt mt-2 transition-colors"

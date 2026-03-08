@@ -70,7 +70,7 @@ impl DownloadEngine {
 
     fn build_client(proxy_url: Option<&str>) -> reqwest::Client {
         let mut builder = reqwest::Client::builder()
-            .user_agent("Bolt/0.1.0")
+            .user_agent(format!("Bolt/{}", env!("CARGO_PKG_VERSION")))
             .pool_max_idle_per_host(16)
             .pool_idle_timeout(Duration::from_secs(90))
             .tcp_nodelay(true)

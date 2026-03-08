@@ -685,7 +685,7 @@ fn build_settings_view<'a>(
                 row![
                     icon_sized(bs::lightning_charge_fill, 15.0).color(colors.text_disabled),
                     Space::new().width(6),
-                    text("Bolt v0.1.0").size(12).color(colors.text_disabled),
+                    text(format!("Bolt v{}", env!("CARGO_PKG_VERSION"))).size(12).color(colors.text_disabled),
                     Space::new().width(8),
                     text("·").size(12).color(colors.text_disabled),
                     Space::new().width(8),
