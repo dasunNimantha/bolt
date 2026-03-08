@@ -1,34 +1,37 @@
 # Bolt
 
-Fast multi-threaded download manager for Linux, Windows and macOS. Built with Rust.
+Fast multi-threaded download manager for Linux, Windows and macOS. Built with Rust and [iced](https://iced.rs).
 
 ## Features
 
-- **Multi-segment downloading** -- splits files into up to 8 parallel segments for maximum throughput
-- **Pause, resume & persistence** -- stop and continue downloads without losing progress; state survives restarts
-- **Speed limiting & concurrency** -- configurable bandwidth cap (KB/s) and simultaneous download limit (1–10)
-- **Download scheduling** -- set a daily time window to auto-start all queued downloads
-- **System tray & background mode** -- minimizes to tray on close; live tooltip with speed/status
-- **Auto-resume on reconnect** -- detects network recovery and retries failed downloads automatically
-- **Search & history** -- filter downloads by name or URL; completed downloads are tracked in persistent history
+- **Multi-segment downloading** -- splits files into up to 8 parallel segments for maximum throughput (auto-scales by file size: 1 segment < 5 MB, 2 < 20 MB, 4 < 50 MB, 6 < 200 MB, 8 for larger)
+- **Pause, resume & persistence** -- stop and continue downloads without losing progress; segment state survives app restarts
+- **Speed limiting** -- configurable global bandwidth cap in KB/s, distributed evenly across active segments
+- **Concurrent downloads** -- control how many downloads run simultaneously (1–10); queued downloads auto-start when slots free up
+- **Download scheduling** -- set a daily time window to auto-start queued downloads
+- **Proxy support** -- HTTP, HTTPS and SOCKS5 proxy with username/password authentication and one-click connection testing
+- **System tray & background mode** -- minimizes to tray on close; live tooltip shows speed and active count; `--background` flag starts hidden
+- **Auto-resume on reconnect** -- periodic connectivity check (`generate_204`); retries all failed downloads when network returns
+- **File categorization** -- automatic category detection (Video, Audio, Document, Archive, Image, Application) from file extension
+- **Download history** -- completed downloads are tracked persistently (up to 500 entries) with filename and URL search
 - **Batch downloads** -- paste multiple URLs or import from a text file to queue downloads in bulk
-- **Smart queue management** -- auto-start queued downloads when slots open, auto-retry failed segments
-- **Browser integration** -- Chrome extension intercepts downloads and sends them to Bolt with a confirmation popup
-- **Dark / Light / System theme** -- choose between dark, light, or auto-follow OS theme
-- **Multi-window popups** -- browser-intercepted downloads open in their own always-on-top dialog window
-- **Cross-platform** -- runs on Linux (Wayland + X11), Windows and macOS with native file dialogs
-
-### Coming soon
-
-- **Proxy support** -- HTTP, HTTPS and SOCKS5 proxy with authentication and connection testing (implemented, UI hidden pending stabilization)
+- **Browser integration** -- Chrome/Chromium extension intercepts downloads, captures cookies and referrer, and sends them to Bolt with a confirmation popup
+- **Dark / Light / System theme** -- three theme modes with full widget styling
+- **Multi-window** -- browser-intercepted downloads each open in their own always-on-top confirmation dialog with Start/Queue/Dismiss
+- **Auto-start on login** -- optional system autostart (Linux `.desktop`, macOS `launchd`, Windows registry)
+- **Cross-platform** -- Linux (Wayland + X11), Windows, macOS with native file dialogs
 
 ## Browser Integration
 
-Bolt can intercept downloads from Chrome/Chromium browsers. Three components work together:
+Bolt intercepts downloads from Chrome/Chromium-based browsers. Three components work together:
 
-1. **Chrome extension** (`extension/`) -- intercepts `chrome.downloads.onCreated`, cancels the browser download, captures cookies and referrer, and sends the request to the native messaging host
-2. **Native messaging host** (`bolt-nmh`) -- a small Rust binary that bridges Chrome's native messaging protocol (stdin/stdout with 4-byte length-prefixed JSON) to Bolt's TCP IPC server
-3. **IPC server** (inside Bolt) -- listens on `localhost:9817` for JSON download requests; each incoming download opens its own popup window for confirmation
+1. **Chrome extension** (`extension/`) -- intercepts `chrome.downloads.onCreated`, cancels the browser download, captures cookies and referrer, sends the request to the native messaging host
+2. **Native messaging host** (`bolt-nmh`) -- bridges Chrome's native messaging protocol (stdin/stdout, 4-byte length-prefixed JSON) to Bolt's TCP IPC server
+3. **IPC server** (inside Bolt) -- listens on `localhost:9817` for JSON download requests; each download opens its own confirmation popup
+
+The extension popup provides toggles for:
+- **Intercept Downloads** -- enable/disable download interception
+- **Forward Cookies** -- send browser cookies with the download request (requires optional `cookies` permission)
 
 ### Setup
 
@@ -36,14 +39,17 @@ Bolt can intercept downloads from Chrome/Chromium browsers. Three components wor
 # Build the native messaging host
 cargo build --release -p bolt-nmh
 
-# Install the native messaging host manifest (Linux)
-cd bolt-nmh && ./install.sh
+# Install the NMH manifest (Linux — auto-detects Chrome, Chromium, Brave, Edge, Vivaldi)
+cd bolt-nmh && ./install.sh <your-extension-id>
 
-# Load the extension in Chrome
-# 1. Open chrome://extensions
-# 2. Enable Developer Mode
-# 3. Click "Load unpacked" and select the extension/ directory
+# Alternatively, Bolt auto-installs/updates the NMH manifest on startup
+# if an existing manifest is found (dev mode)
 ```
+
+Load the extension in Chrome:
+1. Open `chrome://extensions`
+2. Enable **Developer Mode**
+3. Click **Load unpacked** and select the `extension/` directory
 
 ## Building
 
@@ -66,9 +72,7 @@ sudo dnf install pkg-config openssl-devel fontconfig-devel \
 sudo pacman -S pkg-config openssl fontconfig gtk3 libayatana-appindicator libxdo
 ```
 
-**Windows**: No extra system dependencies -- just Rust via `rustup`.
-
-**macOS**: No extra system dependencies -- just Rust via `rustup`.
+**Windows / macOS**: No extra system dependencies -- just Rust via `rustup`.
 
 ### Build and run
 
@@ -76,78 +80,98 @@ sudo pacman -S pkg-config openssl fontconfig gtk3 libayatana-appindicator libxdo
 # Debug build
 cargo run
 
-# Release build (optimized)
+# Release build (full workspace: bolt + bolt-nmh)
 cargo build --workspace --release
 
-# Linux / macOS
-./target/release/bolt
+# Run
+./target/release/bolt              # Linux / macOS
+.\target\release\bolt.exe          # Windows
+./target/release/bolt --background # Start minimized to tray
+```
 
-# Windows
-.\target\release\bolt.exe
+### Packaging
+
+Pre-built packages include both `bolt` and `bolt-nmh` binaries:
+
+| Format | Config |
+|--------|--------|
+| `.deb` | `Cargo.toml` `[package.metadata.deb]` -- package name `bolt-dm` |
+| `.rpm` | `Cargo.toml` `[package.metadata.generate-rpm]` |
+| AUR | `dist/aur/PKGBUILD` -- package name `bolt-dm-bin` |
+
+```bash
+# Build .deb
+cargo install cargo-deb
+cargo deb
+
+# Build .rpm
+cargo install cargo-generate-rpm
+cargo generate-rpm
 ```
 
 ## Usage
 
 1. Paste a download URL into the input bar and click **Add**
-2. The file info is fetched and the download appears in the queue
+2. The file info is resolved and the download appears in the queue
 3. Click the play button to start downloading
 4. Use pause/resume/cancel buttons to control active downloads
 5. Completed files can be opened or their folder revealed
-6. Open **Settings** (gear icon) to configure speed limits, concurrency, theme, and download directory
-7. Close the window while downloads are active -- the app minimizes to the system tray
+6. Open **Settings** (gear icon) to configure speed limits, concurrency, scheduling, theme, proxy, and download directory
+7. Close the window -- the app minimizes to the system tray
 8. Right-click the tray icon to show the window or quit
 
 ## Architecture
 
 ```
 src/
-├── main.rs              # Entry point, iced daemon config
-├── app.rs               # Application state and message handling
+├── main.rs              # Entry point, iced daemon, font loading
+├── app.rs               # Application state, message handling, IPC polling
 ├── message.rs           # Message enum (Elm architecture)
-├── model.rs             # Data structures (DownloadItem, PendingDownload, etc.)
-├── settings.rs          # Persistent settings and download database (JSON)
-├── theme.rs             # Color scheme and widget styles (closure-based)
-├── tray.rs              # System tray icon, menu, and event polling
+├── model.rs             # DownloadItem, FileCategory, SpeedTracker, etc.
+├── settings.rs          # AppSettings, DownloadDatabase, DownloadHistory, ProxyConfig
+├── theme.rs             # ColorScheme, ThemeMode, widget styles
+├── tray.rs              # System tray icon, menu, tooltip, event polling
 ├── ipc.rs               # TCP IPC server (localhost:9817) for browser integration
-├── view.rs              # UI layout and rendering (multi-window dispatch)
-├── lib.rs               # Module declarations
+├── nmh.rs               # NMH manifest auto-install for detected browsers
+├── autostart.rs         # Platform autostart (Linux/macOS/Windows)
+├── view.rs              # UI layout, settings panel, popup confirmation windows
 ├── download/
-│   ├── mod.rs           # Download module
-│   ├── engine.rs        # Download engine (queue, segments, state, persistence)
+│   ├── engine.rs        # Download engine (queue, segments, concurrency, persistence)
 │   └── worker.rs        # Segment worker (HTTP streaming, retry, throttling, I/O)
 └── utils/
-    ├── mod.rs           # Utils module
-    └── format.rs        # Byte/speed/ETA formatting
+    └── format.rs        # Byte/speed/ETA/filename formatting
 
-bolt-nmh/                    # Native messaging host binary (workspace member)
-├── Cargo.toml
-├── com.bolt.nmh.json.template   # Chrome native messaging host manifest
-├── install.sh               # Linux install script
-└── src/main.rs              # Chrome native messaging ↔ Bolt IPC bridge
+bolt-nmh/                # Native messaging host (workspace member)
+├── src/main.rs          # Chrome NMH ↔ Bolt IPC bridge
+├── install.sh           # Linux/macOS install script
+└── com.bolt.nmh.json.template
 
-extension/                   # Chrome extension (Manifest V3)
-├── manifest.json
-├── background.js            # Download interception, cookie capture, native messaging
-├── popup.html + popup.js    # Toggle on/off, connection status
-└── icons/                   # SVG icons
+extension/               # Chrome extension (Manifest V3)
+├── manifest.json        # Permissions: downloads, nativeMessaging, storage
+├── background.js        # Download interception, cookie forwarding, NMH messaging
+├── popup.html           # Extension popup UI
+└── popup.js             # Toggle logic, connection status check
 ```
 
 ## Dependencies
 
 | Crate | Purpose |
 |-------|---------|
-| `iced` 0.14 | GUI framework (Elm architecture, multi-window daemon) |
+| `iced` 0.14 | GUI framework (Elm architecture, multi-window, Wayland + X11) |
 | `iced_fonts` 0.3 | Bootstrap icon font |
-| `tokio` | Async runtime |
-| `reqwest` | HTTP client with streaming |
-| `serde` / `serde_json` | Settings and download state serialization |
-| `tray-icon` | Cross-platform system tray |
-| `chrono` | Date/time for scheduling |
-| `uuid` | Unique download identifiers |
-| `rfd` | Native file dialogs |
-| `image` | App icon loading |
-| `directories` | Platform config/data paths |
-| `anyhow` | Error handling |
+| `tokio` 1 | Async runtime (full features) |
+| `futures` 0.3 | Stream utilities for download workers |
+| `reqwest` 0.11 | HTTP client (streaming, rustls-tls, SOCKS5 proxy) |
+| `serde` / `serde_json` | Settings, download state, and IPC serialization |
+| `tray-icon` 0.21 | Cross-platform system tray |
+| `chrono` 0.4 | Date/time for scheduling and history |
+| `uuid` 1 | Unique download identifiers |
+| `rfd` 0.14 | Native file/folder dialogs |
+| `image` 0.25 | App icon loading (PNG) |
+| `directories` 5.0 | Platform config/data paths (`~/.config/Bolt/`) |
+| `url` 2 | URL parsing and validation |
+| `anyhow` 1.0 | Error handling |
+| `gtk` 0.18 | Linux tray support |
 
 ## License
 

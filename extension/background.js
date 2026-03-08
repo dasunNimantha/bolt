@@ -4,15 +4,18 @@ let interceptEnabled = true;
 const interceptedIds = new Set();
 const fallbackUrls = new Set();
 
+// ─── Settings ───────────────────────────────────────────────────────────
+
 chrome.storage.local.get({ enabled: true }, (data) => {
   interceptEnabled = data.enabled;
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.enabled) {
-    interceptEnabled = changes.enabled.newValue;
-  }
+  if (area !== "local") return;
+  if (changes.enabled) interceptEnabled = changes.enabled.newValue;
 });
+
+// ─── Download interception ──────────────────────────────────────────────
 
 chrome.downloads.onCreated.addListener((downloadItem) => {
   if (!interceptEnabled) return;
@@ -50,13 +53,14 @@ chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
   suggest();
 });
 
-async function gatherAndSend(url, filename, referrer) {
+// ─── Shared helpers ─────────────────────────────────────────────────────
+
+async function gatherAndSend(url, filename, referrer, cookieDomain) {
   let cookies = null;
   try {
     if (chrome.cookies) {
-      const cookieList = await chrome.cookies.getAll({
-        domain: new URL(url).hostname,
-      });
+      const domain = cookieDomain || cookieDomainFor(url);
+      const cookieList = await chrome.cookies.getAll({ domain });
       if (cookieList.length) {
         cookies = cookieList.map((c) => `${c.name}=${c.value}`).join("; ");
       }
@@ -69,7 +73,10 @@ async function gatherAndSend(url, filename, referrer) {
   if (cookies) message.cookies = cookies;
 
   chrome.runtime.sendNativeMessage(NATIVE_HOST, message, (response) => {
-    if (chrome.runtime.lastError || (response && response.status === "error")) {
+    if (
+      chrome.runtime.lastError ||
+      (response && response.status === "error")
+    ) {
       fallbackToChrome(url);
     } else if (response && response.status === "ok") {
       setBadge("\u2713", "#4CAF50");
@@ -97,4 +104,16 @@ function setBadge(text, color) {
   chrome.action.setBadgeText({ text });
   chrome.action.setBadgeBackgroundColor({ color });
   setTimeout(() => chrome.action.setBadgeText({ text: "" }), 3000);
+}
+
+function cookieDomainFor(url) {
+  try {
+    const host = new URL(url).hostname;
+    if (host.endsWith(".fbcdn.net")) return ".facebook.com";
+    if (host.endsWith(".twimg.com")) return ".twitter.com";
+    if (host.endsWith(".cdninstagram.com")) return ".instagram.com";
+    return host;
+  } catch (_) {
+    return "";
+  }
 }
