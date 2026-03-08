@@ -482,4 +482,191 @@ mod tests {
         };
         assert!(s.is_within_schedule(), "0:00–23:59 covers all times");
     }
+
+    #[test]
+    fn proxy_type_labels() {
+        assert_eq!(ProxyType::None.label(), "None");
+        assert_eq!(ProxyType::Http.label(), "HTTP");
+        assert_eq!(ProxyType::Https.label(), "HTTPS");
+        assert_eq!(ProxyType::Socks5.label(), "SOCKS5");
+    }
+
+    #[test]
+    fn proxy_type_schemes() {
+        assert_eq!(ProxyType::None.scheme(), "");
+        assert_eq!(ProxyType::Http.scheme(), "http");
+        assert_eq!(ProxyType::Https.scheme(), "https");
+        assert_eq!(ProxyType::Socks5.scheme(), "socks5h");
+    }
+
+    #[test]
+    fn proxy_type_display() {
+        assert_eq!(format!("{}", ProxyType::Http), "HTTP");
+        assert_eq!(format!("{}", ProxyType::Socks5), "SOCKS5");
+    }
+
+    #[test]
+    fn proxy_type_all_variants() {
+        assert_eq!(ProxyType::ALL.len(), 4);
+        assert_eq!(ProxyType::ALL[0], ProxyType::None);
+        assert_eq!(ProxyType::ALL[3], ProxyType::Socks5);
+    }
+
+    #[test]
+    fn proxy_config_to_url_none_type() {
+        let config = ProxyConfig {
+            proxy_type: ProxyType::None,
+            host: "proxy.example.com".to_string(),
+            ..ProxyConfig::default()
+        };
+        assert!(config.to_url().is_none());
+    }
+
+    #[test]
+    fn proxy_config_to_url_empty_host() {
+        let config = ProxyConfig {
+            proxy_type: ProxyType::Http,
+            host: String::new(),
+            ..ProxyConfig::default()
+        };
+        assert!(config.to_url().is_none());
+    }
+
+    #[test]
+    fn proxy_config_to_url_host_only() {
+        let config = ProxyConfig {
+            proxy_type: ProxyType::Http,
+            host: "proxy.example.com".to_string(),
+            port: String::new(),
+            username: String::new(),
+            password: String::new(),
+        };
+        assert_eq!(config.to_url().unwrap(), "http://proxy.example.com");
+    }
+
+    #[test]
+    fn proxy_config_to_url_host_port() {
+        let config = ProxyConfig {
+            proxy_type: ProxyType::Socks5,
+            host: "proxy.example.com".to_string(),
+            port: "1080".to_string(),
+            username: String::new(),
+            password: String::new(),
+        };
+        assert_eq!(config.to_url().unwrap(), "socks5h://proxy.example.com:1080");
+    }
+
+    #[test]
+    fn proxy_config_to_url_with_auth() {
+        let config = ProxyConfig {
+            proxy_type: ProxyType::Https,
+            host: "secure.proxy.com".to_string(),
+            port: "8443".to_string(),
+            username: "user".to_string(),
+            password: "pass".to_string(),
+        };
+        assert_eq!(
+            config.to_url().unwrap(),
+            "https://user:pass@secure.proxy.com:8443"
+        );
+    }
+
+    #[test]
+    fn proxy_config_to_url_user_no_password() {
+        let config = ProxyConfig {
+            proxy_type: ProxyType::Http,
+            host: "proxy.example.com".to_string(),
+            port: "3128".to_string(),
+            username: "user".to_string(),
+            password: String::new(),
+        };
+        assert_eq!(
+            config.to_url().unwrap(),
+            "http://user@proxy.example.com:3128"
+        );
+    }
+
+    #[test]
+    fn proxy_config_is_active() {
+        assert!(!ProxyConfig::default().is_active());
+
+        let active = ProxyConfig {
+            proxy_type: ProxyType::Http,
+            host: "proxy.example.com".to_string(),
+            ..ProxyConfig::default()
+        };
+        assert!(active.is_active());
+
+        let no_host = ProxyConfig {
+            proxy_type: ProxyType::Http,
+            host: String::new(),
+            ..ProxyConfig::default()
+        };
+        assert!(!no_host.is_active());
+    }
+
+    #[test]
+    fn app_settings_defaults() {
+        let s = AppSettings::default();
+        assert_eq!(s.max_concurrent, 3);
+        assert_eq!(s.segments_per_download, 8);
+        assert!(s.speed_limit.is_none());
+        assert_eq!(s.theme_mode, ThemeMode::Dark);
+        assert!(!s.schedule_enabled);
+        assert_eq!(s.schedule_from, (22, 0));
+        assert_eq!(s.schedule_to, (6, 0));
+        assert!(s.autostart);
+        assert_eq!(s.proxy.proxy_type, ProxyType::None);
+    }
+
+    #[test]
+    fn app_settings_serde_roundtrip() {
+        let s = AppSettings::default();
+        let json = serde_json::to_string(&s).unwrap();
+        let restored: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.max_concurrent, s.max_concurrent);
+        assert_eq!(restored.theme_mode, s.theme_mode);
+    }
+
+    #[test]
+    fn history_truncates_at_500() {
+        let mut history = DownloadHistory::default();
+        for i in 0..550 {
+            history.add(HistoryEntry {
+                id: Uuid::new_v4(),
+                url: format!("https://example.com/{}.bin", i),
+                filename: format!("{}.bin", i),
+                save_path: PathBuf::from(format!("/tmp/{}.bin", i)),
+                total_size: Some(100),
+                category: FileCategory::Other,
+                completed_at: "2025-01-01 00:00".to_string(),
+            });
+        }
+        assert_eq!(history.entries.len(), 500);
+    }
+
+    #[test]
+    fn history_search_empty_query() {
+        let mut history = DownloadHistory::default();
+        history.add(HistoryEntry {
+            id: Uuid::new_v4(),
+            url: "https://example.com/f.zip".to_string(),
+            filename: "f.zip".to_string(),
+            save_path: PathBuf::from("/tmp/f.zip"),
+            total_size: Some(1024),
+            category: FileCategory::Archive,
+            completed_at: "2025-03-06 18:00".to_string(),
+        });
+        assert_eq!(history.search("").len(), 1);
+    }
+
+    #[test]
+    fn proxy_config_default_is_none() {
+        let config = ProxyConfig::default();
+        assert_eq!(config.proxy_type, ProxyType::None);
+        assert!(config.host.is_empty());
+        assert!(config.port.is_empty());
+        assert!(config.username.is_empty());
+        assert!(config.password.is_empty());
+    }
 }

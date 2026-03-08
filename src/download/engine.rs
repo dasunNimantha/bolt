@@ -1327,4 +1327,146 @@ mod tests {
         let engine = DownloadEngine::new();
         assert!(engine.get_failed_ids().is_empty());
     }
+
+    #[test]
+    fn get_ui_state_empty() {
+        let engine = DownloadEngine::new();
+        let (items, speed, counts) = engine.get_ui_state();
+        assert!(items.is_empty());
+        assert_eq!(speed, 0.0);
+        assert_eq!(counts, (0, 0, 0, 0, 0));
+    }
+
+    #[test]
+    fn get_ui_state_with_downloads() {
+        let engine = DownloadEngine::new();
+
+        let db = DownloadDatabase::from_persisted(vec![
+            crate::model::PersistedDownload {
+                id: Uuid::new_v4(),
+                url: "https://example.com/a".to_string(),
+                filename: "a".to_string(),
+                save_path: PathBuf::from("/tmp/a"),
+                total_size: Some(100),
+                status: DownloadStatus::Completed,
+                segments: vec![PersistedSegment {
+                    start: 0,
+                    end: 100,
+                    downloaded: 100,
+                }],
+                category: FileCategory::Other,
+                error: None,
+                resumable: true,
+                headers: HashMap::new(),
+            },
+            crate::model::PersistedDownload {
+                id: Uuid::new_v4(),
+                url: "https://example.com/b".to_string(),
+                filename: "b".to_string(),
+                save_path: PathBuf::from("/tmp/b"),
+                total_size: Some(200),
+                status: DownloadStatus::Failed,
+                segments: vec![PersistedSegment {
+                    start: 0,
+                    end: 200,
+                    downloaded: 50,
+                }],
+                category: FileCategory::Other,
+                error: Some("timeout".to_string()),
+                resumable: true,
+                headers: HashMap::new(),
+            },
+            crate::model::PersistedDownload {
+                id: Uuid::new_v4(),
+                url: "https://example.com/c".to_string(),
+                filename: "c".to_string(),
+                save_path: PathBuf::from("/tmp/c"),
+                total_size: Some(300),
+                status: DownloadStatus::Paused,
+                segments: vec![PersistedSegment {
+                    start: 0,
+                    end: 300,
+                    downloaded: 150,
+                }],
+                category: FileCategory::Other,
+                error: None,
+                resumable: true,
+                headers: HashMap::new(),
+            },
+        ]);
+
+        engine.restore_downloads(&db);
+        let (items, _speed, counts) = engine.get_ui_state();
+
+        assert_eq!(items.len(), 3);
+        let (_total, active, completed, paused, failed) = counts;
+        assert_eq!(active, 0);
+        assert_eq!(completed, 1);
+        assert_eq!(paused, 1);
+        assert_eq!(failed, 1);
+    }
+
+    #[test]
+    fn urldecode_empty() {
+        assert_eq!(urldecode(""), "");
+    }
+
+    #[test]
+    fn urldecode_no_encoding() {
+        assert_eq!(urldecode("hello_world"), "hello_world");
+    }
+
+    #[test]
+    fn urldecode_incomplete_percent() {
+        // '%2' consumes "2" as hex → char(2); '%' alone consumes nothing
+        let result = urldecode("hello%2");
+        assert_eq!(result, "hello\u{2}");
+        assert_eq!(urldecode("hello%"), "hello");
+    }
+
+    #[test]
+    fn parse_content_disposition_utf8_filename_star() {
+        let cd = "attachment; filename*=UTF-8''my%20file.zip";
+        assert_eq!(
+            parse_content_disposition(cd),
+            Some("my file.zip".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_content_disposition_both_prefer_star() {
+        // filename*= appears before filename= → filename* wins
+        let cd = "attachment; filename*=UTF-8''preferred.zip; filename=\"fallback.zip\"";
+        assert_eq!(
+            parse_content_disposition(cd),
+            Some("preferred.zip".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_content_disposition_inline() {
+        assert!(parse_content_disposition("inline").is_none());
+    }
+
+    #[test]
+    fn segment_count_exact_boundary() {
+        // 4*MIN_SEGMENT_SIZE = 8MB → falls in <20MB bracket (target=2), min(2, 4)=2
+        assert_eq!(calc_segment_count(Some(MIN_SEGMENT_SIZE * 4), true), 2);
+    }
+
+    #[test]
+    fn segment_count_50mb() {
+        // 50MB → falls in <200MB bracket (target=6), by_size=25, min(6,25)=6
+        assert_eq!(calc_segment_count(Some(50 * 1024 * 1024), true), 6);
+    }
+
+    #[test]
+    fn create_segments_two() {
+        let segs = create_segments(Some(200), 2);
+        assert_eq!(segs.len(), 2);
+        assert_eq!(segs[0].0, 0);
+        assert_eq!(segs[0].1, 100);
+        assert_eq!(segs[1].0, 100);
+        assert_eq!(segs[1].1, 200);
+    }
 }

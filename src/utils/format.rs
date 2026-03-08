@@ -162,4 +162,50 @@ mod tests {
         let result = truncate_filename(name, 15);
         assert!(result.contains('…'));
     }
+
+    #[test]
+    fn truncate_filename_exact_length() {
+        assert_eq!(truncate_filename("exactly10.", 10), "exactly10.");
+    }
+
+    #[test]
+    fn truncate_filename_ext_longer_than_budget() {
+        let name = "x.verylongextension";
+        let result = truncate_filename(name, 5);
+        assert!(result.contains('…'));
+        assert!(result.chars().count() <= 5);
+    }
+
+    #[test]
+    fn format_eta_zero() {
+        assert_eq!(format_eta(0), "0s");
+    }
+
+    #[test]
+    fn format_eta_exact_minute() {
+        assert_eq!(format_eta(60), "1m 0s");
+    }
+
+    #[test]
+    fn format_eta_exact_hour() {
+        assert_eq!(format_eta(3600), "1h 0m");
+    }
+
+    #[test]
+    fn format_bytes_boundary_values() {
+        assert_eq!(format_bytes(1023), "1023 B");
+        assert_eq!(format_bytes(1024), "1.0 KB");
+        assert_eq!(format_bytes(1024 * 1024 - 1), "1024.0 KB");
+    }
+
+    #[test]
+    fn format_speed_small_value() {
+        assert_eq!(format_speed(1.0), "1 B/s");
+    }
+
+    #[test]
+    fn truncate_url_exact_max() {
+        let url = "https://example.com";
+        assert_eq!(truncate_url(url, url.len()), url);
+    }
 }

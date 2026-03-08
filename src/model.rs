@@ -577,4 +577,94 @@ mod tests {
         assert_eq!(restored.filename, "file.zip");
         assert_eq!(restored.completed_at, "2025-03-06 18:00");
     }
+
+    #[test]
+    fn display_filename_with_resolved() {
+        let pd = PendingDownload {
+            url: "https://example.com/other.bin".to_string(),
+            filename: Some("explicit.zip".to_string()),
+            headers: HashMap::new(),
+            resolved: Some(ResolvedFileInfo {
+                filename: "resolved.tar.gz".to_string(),
+                total_size: Some(1024),
+                resumable: true,
+            }),
+        };
+        assert_eq!(pd.display_filename(), "resolved.tar.gz");
+    }
+
+    #[test]
+    fn display_filename_with_explicit() {
+        let pd = PendingDownload {
+            url: "https://example.com/other.bin".to_string(),
+            filename: Some("explicit.zip".to_string()),
+            headers: HashMap::new(),
+            resolved: None,
+        };
+        assert_eq!(pd.display_filename(), "explicit.zip");
+    }
+
+    #[test]
+    fn display_filename_from_url() {
+        let pd = PendingDownload {
+            url: "https://example.com/downloads/archive.tar.gz".to_string(),
+            filename: None,
+            headers: HashMap::new(),
+            resolved: None,
+        };
+        assert_eq!(pd.display_filename(), "archive.tar.gz");
+    }
+
+    #[test]
+    fn display_filename_url_with_query() {
+        let pd = PendingDownload {
+            url: "https://example.com/file.zip?token=abc&v=2".to_string(),
+            filename: None,
+            headers: HashMap::new(),
+            resolved: None,
+        };
+        assert_eq!(pd.display_filename(), "file.zip");
+    }
+
+    #[test]
+    fn display_filename_url_with_fragment() {
+        let pd = PendingDownload {
+            url: "https://example.com/file.zip#section".to_string(),
+            filename: None,
+            headers: HashMap::new(),
+            resolved: None,
+        };
+        assert_eq!(pd.display_filename(), "file.zip");
+    }
+
+    #[test]
+    fn display_filename_empty_explicit_falls_through() {
+        let pd = PendingDownload {
+            url: "https://example.com/fallback.bin".to_string(),
+            filename: Some(String::new()),
+            headers: HashMap::new(),
+            resolved: None,
+        };
+        assert_eq!(pd.display_filename(), "fallback.bin");
+    }
+
+    #[test]
+    fn display_filename_trailing_slash() {
+        let pd = PendingDownload {
+            url: "https://example.com/path/".to_string(),
+            filename: None,
+            headers: HashMap::new(),
+            resolved: None,
+        };
+        assert_eq!(pd.display_filename(), "download");
+    }
+
+    #[test]
+    fn download_filter_labels() {
+        assert_eq!(DownloadFilter::All.label(), "All");
+        assert_eq!(DownloadFilter::Active.label(), "Active");
+        assert_eq!(DownloadFilter::Completed.label(), "Completed");
+        assert_eq!(DownloadFilter::Paused.label(), "Paused");
+        assert_eq!(DownloadFilter::Failed.label(), "Failed");
+    }
 }

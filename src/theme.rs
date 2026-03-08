@@ -620,6 +620,94 @@ pub fn scrollable_style(
 
 // ============== Checkbox / Toggle Style ==============
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn theme_mode_effective_system_dark() {
+        assert_eq!(ThemeMode::System.effective(true), ThemeMode::Dark);
+    }
+
+    #[test]
+    fn theme_mode_effective_system_light() {
+        assert_eq!(ThemeMode::System.effective(false), ThemeMode::Light);
+    }
+
+    #[test]
+    fn theme_mode_effective_dark_passthrough() {
+        assert_eq!(ThemeMode::Dark.effective(false), ThemeMode::Dark);
+        assert_eq!(ThemeMode::Dark.effective(true), ThemeMode::Dark);
+    }
+
+    #[test]
+    fn theme_mode_effective_light_passthrough() {
+        assert_eq!(ThemeMode::Light.effective(false), ThemeMode::Light);
+        assert_eq!(ThemeMode::Light.effective(true), ThemeMode::Light);
+    }
+
+    #[test]
+    fn theme_mode_labels() {
+        assert_eq!(ThemeMode::Dark.label(), "Dark");
+        assert_eq!(ThemeMode::Light.label(), "Light");
+        assert_eq!(ThemeMode::System.label(), "System");
+    }
+
+    #[test]
+    fn theme_mode_default_is_dark() {
+        assert_eq!(ThemeMode::default(), ThemeMode::Dark);
+    }
+
+    #[test]
+    fn get_colors_dark_mode() {
+        let colors = get_colors(ThemeMode::Dark);
+        assert!(colors.bg_primary.r < 0.2, "dark bg should have low R");
+    }
+
+    #[test]
+    fn get_colors_light_mode() {
+        let colors = get_colors(ThemeMode::Light);
+        assert!(colors.bg_primary.r > 0.9, "light bg should have high R");
+    }
+
+    #[test]
+    fn get_colors_system_defaults_dark() {
+        let dark = get_colors(ThemeMode::Dark);
+        let system = get_colors(ThemeMode::System);
+        assert_eq!(dark.bg_primary.r, system.bg_primary.r);
+    }
+
+    #[test]
+    fn bolt_theme_produces_theme() {
+        let theme = bolt_theme(ThemeMode::Dark);
+        assert_eq!(
+            theme.palette().background,
+            get_colors(ThemeMode::Dark).bg_primary
+        );
+    }
+
+    #[test]
+    fn color_scheme_dark_accent() {
+        let dark = ColorScheme::dark();
+        assert!(dark.accent_primary.r > 0.9);
+        assert!(dark.accent_primary.g > 0.7);
+    }
+
+    #[test]
+    fn color_scheme_light_accent() {
+        let light = ColorScheme::light();
+        assert!(light.accent_primary.r > 0.8);
+    }
+
+    #[test]
+    fn theme_mode_serde_roundtrip() {
+        let mode = ThemeMode::Light;
+        let json = serde_json::to_string(&mode).unwrap();
+        let restored: ThemeMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, mode);
+    }
+}
+
 pub fn toggle_style(colors: ColorScheme) -> impl Fn(&Theme, checkbox::Status) -> checkbox::Style {
     move |_theme, status| {
         let (is_checked, is_hovered) = match status {

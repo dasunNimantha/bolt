@@ -119,3 +119,129 @@ fn process_request(line: &str, pending: &Arc<Mutex<Vec<PendingDownload>>>) -> Ip
         message: None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::PendingDownload;
+
+    fn empty_pending() -> Arc<Mutex<Vec<PendingDownload>>> {
+        Arc::new(Mutex::new(Vec::new()))
+    }
+
+    #[test]
+    fn process_request_ping() {
+        let pending = empty_pending();
+        let resp = process_request(r#"{"ping": true}"#, &pending);
+        assert_eq!(resp.status, "ok");
+        assert_eq!(resp.message.as_deref(), Some("pong"));
+        assert!(pending.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn process_request_invalid_json() {
+        let pending = empty_pending();
+        let resp = process_request("not json at all", &pending);
+        assert_eq!(resp.status, "error");
+        assert!(resp.message.unwrap().contains("Invalid JSON"));
+    }
+
+    #[test]
+    fn process_request_missing_url() {
+        let pending = empty_pending();
+        let resp = process_request(r#"{"url": ""}"#, &pending);
+        assert_eq!(resp.status, "error");
+        assert_eq!(resp.message.as_deref(), Some("Missing url field"));
+    }
+
+    #[test]
+    fn process_request_url_defaults_empty() {
+        let pending = empty_pending();
+        let resp = process_request(r#"{}"#, &pending);
+        assert_eq!(resp.status, "error");
+        assert_eq!(resp.message.as_deref(), Some("Missing url field"));
+    }
+
+    #[test]
+    fn process_request_add_download() {
+        let pending = empty_pending();
+        let resp = process_request(
+            r#"{"url": "https://example.com/file.zip", "filename": "file.zip"}"#,
+            &pending,
+        );
+        assert_eq!(resp.status, "ok");
+        assert!(resp.message.is_none());
+
+        let items = pending.lock().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].url, "https://example.com/file.zip");
+        assert_eq!(items[0].filename.as_deref(), Some("file.zip"));
+    }
+
+    #[test]
+    fn process_request_with_referrer() {
+        let pending = empty_pending();
+        process_request(
+            r#"{"url": "https://cdn.example.com/a.bin", "referrer": "https://example.com/page"}"#,
+            &pending,
+        );
+        let items = pending.lock().unwrap();
+        assert_eq!(
+            items[0].headers.get("Referer").unwrap(),
+            "https://example.com/page"
+        );
+    }
+
+    #[test]
+    fn process_request_with_cookies() {
+        let pending = empty_pending();
+        process_request(
+            r#"{"url": "https://example.com/f", "cookies": "sid=abc123; token=xyz"}"#,
+            &pending,
+        );
+        let items = pending.lock().unwrap();
+        assert_eq!(
+            items[0].headers.get("Cookie").unwrap(),
+            "sid=abc123; token=xyz"
+        );
+    }
+
+    #[test]
+    fn process_request_empty_referrer_ignored() {
+        let pending = empty_pending();
+        process_request(
+            r#"{"url": "https://example.com/f", "referrer": ""}"#,
+            &pending,
+        );
+        let items = pending.lock().unwrap();
+        assert!(!items[0].headers.contains_key("Referer"));
+    }
+
+    #[test]
+    fn process_request_empty_cookies_ignored() {
+        let pending = empty_pending();
+        process_request(
+            r#"{"url": "https://example.com/f", "cookies": ""}"#,
+            &pending,
+        );
+        let items = pending.lock().unwrap();
+        assert!(!items[0].headers.contains_key("Cookie"));
+    }
+
+    #[test]
+    fn process_request_no_filename() {
+        let pending = empty_pending();
+        process_request(r#"{"url": "https://example.com/f"}"#, &pending);
+        let items = pending.lock().unwrap();
+        assert!(items[0].filename.is_none());
+    }
+
+    #[test]
+    fn process_request_multiple_downloads() {
+        let pending = empty_pending();
+        process_request(r#"{"url": "https://example.com/a"}"#, &pending);
+        process_request(r#"{"url": "https://example.com/b"}"#, &pending);
+        process_request(r#"{"url": "https://example.com/c"}"#, &pending);
+        assert_eq!(pending.lock().unwrap().len(), 3);
+    }
+}
