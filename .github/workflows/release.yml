@@ -48,17 +48,27 @@ jobs:
 
       - name: Rename binary (Linux/macOS)
         if: matrix.os != 'windows-latest'
-        run: cp target/${{ matrix.target }}/release/bolt ${{ matrix.artifact }}
+        run: |
+          cp target/${{ matrix.target }}/release/bolt ${{ matrix.artifact }}
+          cp target/${{ matrix.target }}/release/bolt-nmh ${{ matrix.artifact }}-nmh
 
       - name: Rename binary (Windows)
         if: matrix.os == 'windows-latest'
-        run: cp target/${{ matrix.target }}/release/bolt.exe ${{ matrix.artifact }}
+        run: |
+          cp target/${{ matrix.target }}/release/bolt.exe ${{ matrix.artifact }}
+          cp target/${{ matrix.target }}/release/bolt-nmh.exe ${{ matrix.artifact }}-nmh.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
+
+      - name: Upload NMH artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-nmh
+          path: ${{ matrix.artifact }}-nmh*
 
       - name: Generate .deb package
         if: matrix.target == 'x86_64-unknown-linux-gnu'
