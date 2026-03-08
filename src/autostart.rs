@@ -28,7 +28,7 @@ mod platform {
 Type=Application
 Name=Bolt
 Comment=Multi-segment download manager
-Exec={exe}
+Exec={exe} --background
 Terminal=false
 StartupNotify=false
 X-GNOME-Autostart-enabled=true
@@ -80,6 +80,7 @@ mod platform {
     <key>ProgramArguments</key>
     <array>
         <string>{exe}</string>
+        <string>--background</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -122,7 +123,7 @@ mod platform {
                     "/t",
                     "REG_SZ",
                     "/d",
-                    &format!("\"{}\"", exe_str),
+                    &format!("\"{}\" --background", exe_str),
                     "/f",
                 ])
                 .output();

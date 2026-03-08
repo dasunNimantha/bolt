@@ -119,10 +119,13 @@ impl BoltApp {
             )
         };
 
+        let start_background = std::env::args().any(|a| a == "--background");
+
         let (main_id, open_main) = window::open(window::Settings {
             size: iced::Size::new(1000.0, 650.0),
             min_size: Some(iced::Size::new(750.0, 450.0)),
             exit_on_close_request: false,
+            visible: !start_background,
             icon: Some(app_icon()),
             #[cfg(target_os = "linux")]
             platform_specific: window::settings::PlatformSpecific {
