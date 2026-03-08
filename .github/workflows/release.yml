@@ -41,42 +41,24 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libssl-dev libfontconfig-dev \
-            libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
+            libgtk-3-dev libayatana-appindicator3-dev
 
       - name: Build
         run: cargo build --workspace --release --target ${{ matrix.target }}
 
       - name: Rename binary (Linux/macOS)
         if: matrix.os != 'windows-latest'
-        run: |
-          cp target/${{ matrix.target }}/release/bolt ${{ matrix.artifact }}
-          cp target/${{ matrix.target }}/release/bolt-nmh bolt-nmh-${{ matrix.target }}
+        run: cp target/${{ matrix.target }}/release/bolt ${{ matrix.artifact }}
 
       - name: Rename binary (Windows)
         if: matrix.os == 'windows-latest'
-        run: |
-          cp target/${{ matrix.target }}/release/bolt.exe ${{ matrix.artifact }}
-          cp target/${{ matrix.target }}/release/bolt-nmh.exe bolt-nmh-${{ matrix.target }}.exe
+        run: cp target/${{ matrix.target }}/release/bolt.exe ${{ matrix.artifact }}
 
-      - name: Upload bolt artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
-
-      - name: Upload bolt-nmh artifact (Linux/macOS)
-        if: matrix.os != 'windows-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: bolt-nmh-${{ matrix.target }}
-          path: bolt-nmh-${{ matrix.target }}
-
-      - name: Upload bolt-nmh artifact (Windows)
-        if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: bolt-nmh-${{ matrix.target }}.exe
-          path: bolt-nmh-${{ matrix.target }}.exe
 
   release:
     needs: build

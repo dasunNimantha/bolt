@@ -50,7 +50,7 @@ url = "2"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 # System tray
-tray-icon = "0.21"
+tray-icon = { version = "0.21", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
