@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { BoltLogo } from "./BoltLogo";
 import { Github, ExternalLink, Heart } from "lucide-react";
 
@@ -45,6 +46,12 @@ export function Footer() {
               Releases
               <ExternalLink className="w-3 h-3" />
             </a>
+            <Link
+              to="/privacy"
+              className="text-sm text-text-muted hover:text-text-primary transition-colors"
+            >
+              Privacy
+            </Link>
           </div>
         </div>
       </div>

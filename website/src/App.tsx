@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { useEffect } from "react";
 import { Home } from "./pages/Home";
 import { DocsPage } from "./pages/DocsPage";
+import { PrivacyPage } from "./pages/PrivacyPage";
 
 function ScrollToHash() {
   const { pathname, hash } = useLocation();
@@ -27,6 +28,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/docs" element={<DocsPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
       </Routes>
     </BrowserRouter>
   );

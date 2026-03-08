@@ -111,6 +111,7 @@ fn find_nmh_binary() -> Option<PathBuf> {
 
 /// Returns all NativeMessagingHosts directories for supported browsers.
 fn nmh_dirs() -> Vec<PathBuf> {
+    #[allow(unused_mut)]
     let mut dirs = Vec::new();
 
     #[cfg(target_os = "linux")]
