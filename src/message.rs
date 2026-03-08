@@ -53,6 +53,8 @@ pub enum Message {
     TestProxy,
     ProxyTestResult(Result<String, String>),
 
+    ToggleAutostart,
+
     // Schedule window
     ToggleSchedule,
     SetScheduleFromH(String),

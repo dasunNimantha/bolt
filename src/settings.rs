@@ -107,6 +107,8 @@ pub struct AppSettings {
     pub schedule_to: (u8, u8),
     #[serde(default)]
     pub proxy: ProxyConfig,
+    #[serde(default = "default_autostart")]
+    pub autostart: bool,
 }
 
 fn default_theme() -> ThemeMode {
@@ -119,6 +121,10 @@ fn default_schedule_from() -> (u8, u8) {
 
 fn default_schedule_to() -> (u8, u8) {
     (6, 0)
+}
+
+fn default_autostart() -> bool {
+    true
 }
 
 impl Default for AppSettings {
@@ -134,6 +140,7 @@ impl Default for AppSettings {
             schedule_from: default_schedule_from(),
             schedule_to: default_schedule_to(),
             proxy: ProxyConfig::default(),
+            autostart: true,
         }
     }
 }

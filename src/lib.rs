@@ -1,4 +1,5 @@
 pub mod app;
+pub mod autostart;
 pub mod download;
 pub mod ipc;
 pub mod message;

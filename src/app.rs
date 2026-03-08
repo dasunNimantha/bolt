@@ -607,6 +607,13 @@ impl BoltApp {
                 Task::none()
             }
 
+            Message::ToggleAutostart => {
+                self.settings.autostart = !self.settings.autostart;
+                crate::autostart::set_enabled(self.settings.autostart);
+                self.settings.save();
+                Task::none()
+            }
+
             Message::ToggleSchedule => {
                 self.settings.schedule_enabled = !self.settings.schedule_enabled;
                 self.settings.save();

@@ -530,6 +530,29 @@ fn build_settings_view<'a>(
                 ),
                 settings_row(
                     colors,
+                    "Start on boot",
+                    button(
+                        row![
+                            icon(if settings.autostart {
+                                bs::toggle_on as fn() -> _
+                            } else {
+                                bs::toggle_off as fn() -> _
+                            })
+                            .size(20),
+                            Space::new().width(6),
+                            text(if settings.autostart { "On" } else { "Off" }).size(14),
+                        ]
+                        .align_y(Alignment::Center),
+                    )
+                    .on_press(Message::ToggleAutostart)
+                    .padding([6, 14])
+                    .style(secondary_button(colors))
+                    .into(),
+                    None,
+                    true,
+                ),
+                settings_row(
+                    colors,
                     "Download directory",
                     button(
                         row![
@@ -685,7 +708,9 @@ fn build_settings_view<'a>(
                 row![
                     icon_sized(bs::lightning_charge_fill, 15.0).color(colors.text_disabled),
                     Space::new().width(6),
-                    text(format!("Bolt v{}", env!("CARGO_PKG_VERSION"))).size(12).color(colors.text_disabled),
+                    text(format!("Bolt v{}", env!("CARGO_PKG_VERSION")))
+                        .size(12)
+                        .color(colors.text_disabled),
                     Space::new().width(8),
                     text("·").size(12).color(colors.text_disabled),
                     Space::new().width(8),
