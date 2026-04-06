@@ -1,3 +1,4 @@
+use crate::download::hls::{self, HlsData};
 use crate::download::worker::download_segment;
 use crate::model::{
     DownloadItem, DownloadStatus, FileCategory, PersistedSegment, ResolvedFileInfo, SegmentInfo,
@@ -41,6 +42,7 @@ struct ManagedDownload {
     /// True when the user clicked Start but was blocked by concurrency limit.
     awaiting_slot: bool,
     headers: HashMap<String, String>,
+    hls_data: Option<HlsData>,
 }
 
 pub struct DownloadEngine {
@@ -145,6 +147,7 @@ impl DownloadEngine {
                 task_handles: Vec::new(),
                 awaiting_slot: false,
                 headers: pd.headers.clone(),
+                hls_data: pd.hls_data.clone(),
             });
         }
     }
@@ -183,6 +186,7 @@ impl DownloadEngine {
                     error: dl.error.clone(),
                     resumable: dl.resumable,
                     headers: dl.headers.clone(),
+                    hls_data: dl.hls_data.clone(),
                 }
             })
             .collect();
@@ -219,6 +223,16 @@ impl DownloadEngine {
         headers: &HashMap<String, String>,
     ) -> Result<ResolvedFileInfo> {
         let client = self.client.lock().unwrap().clone();
+
+        if hls::is_hls_url(url) {
+            let (filename, hls_data) = hls::resolve_hls(&client, url, headers).await?;
+            return Ok(ResolvedFileInfo {
+                filename,
+                total_size: None,
+                resumable: false,
+                hls_data: Some(hls_data),
+            });
+        }
 
         let mut head_req = client.head(url);
         for (k, v) in headers {
@@ -261,6 +275,7 @@ impl DownloadEngine {
             filename,
             total_size,
             resumable,
+            hls_data: None,
         })
     }
 
@@ -279,7 +294,12 @@ impl DownloadEngine {
         let save_path = save_dir.join(&info.filename);
         let id = Uuid::new_v4();
 
-        let num_segments = calc_segment_count(info.total_size, info.resumable);
+        let is_hls = info.hls_data.is_some();
+        let num_segments = if is_hls {
+            1
+        } else {
+            calc_segment_count(info.total_size, info.resumable)
+        };
         let segments = create_segments(info.total_size, num_segments);
 
         let segment_states: Vec<SegmentState> = segments
@@ -325,6 +345,7 @@ impl DownloadEngine {
             task_handles: Vec::new(),
             awaiting_slot: false,
             headers: hdrs,
+            hls_data: info.hls_data,
         };
 
         self.state.lock().unwrap().push(managed);
@@ -353,6 +374,7 @@ impl DownloadEngine {
             cancel_flag,
             num_segments,
             hdrs,
+            hls_data,
         ) = {
             let mut downloads = self.state.lock().unwrap();
 
@@ -398,42 +420,67 @@ impl DownloadEngine {
                 dl.cancel_flag.clone(),
                 n,
                 dl.headers.clone(),
+                dl.hls_data.clone(),
             )
         };
 
-        if let Some(size) = total_size {
-            let file = tokio::fs::OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .open(&save_path)
-                .await?;
-            file.set_len(size).await?;
-        }
-
-        let seg_limit = self.per_segment_limit(num_segments);
-
         let client = self.client.lock().unwrap().clone();
-        let mut task_handles = Vec::new();
-        for (start, end, downloaded) in segments_info {
-            let handle = tokio::spawn(download_segment(
-                client.clone(),
-                url.clone(),
-                save_path.clone(),
-                start,
-                end,
-                downloaded,
-                pause_flag.clone(),
-                cancel_flag.clone(),
-                seg_limit,
-                hdrs.clone(),
-            ));
-            task_handles.push(handle);
-        }
 
-        let mut downloads = self.state.lock().unwrap();
-        if let Some(dl) = downloads.iter_mut().find(|d| d.id == id) {
-            dl.task_handles = task_handles;
+        if let Some(hls) = hls_data {
+            let downloaded = segments_info
+                .first()
+                .map(|(_, _, d)| d.clone())
+                .unwrap_or_else(|| Arc::new(AtomicU64::new(0)));
+
+            let handle = tokio::spawn(hls::download_hls(
+                client,
+                hls,
+                save_path,
+                downloaded,
+                pause_flag,
+                cancel_flag,
+                self.speed_limit.load(Ordering::Relaxed),
+                hdrs,
+            ));
+
+            let mut downloads = self.state.lock().unwrap();
+            if let Some(dl) = downloads.iter_mut().find(|d| d.id == id) {
+                dl.task_handles = vec![handle];
+            }
+        } else {
+            if let Some(size) = total_size {
+                let file = tokio::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(&save_path)
+                    .await?;
+                file.set_len(size).await?;
+            }
+
+            let seg_limit = self.per_segment_limit(num_segments);
+
+            let mut task_handles = Vec::new();
+            for (start, end, downloaded) in segments_info {
+                let handle = tokio::spawn(download_segment(
+                    client.clone(),
+                    url.clone(),
+                    save_path.clone(),
+                    start,
+                    end,
+                    downloaded,
+                    pause_flag.clone(),
+                    cancel_flag.clone(),
+                    seg_limit,
+                    hdrs.clone(),
+                ));
+                task_handles.push(handle);
+            }
+
+            let mut downloads = self.state.lock().unwrap();
+            if let Some(dl) = downloads.iter_mut().find(|d| d.id == id) {
+                dl.task_handles = task_handles;
+            }
         }
 
         Ok(())
@@ -451,7 +498,7 @@ impl DownloadEngine {
     }
 
     pub async fn resume(self: &Arc<Self>, id: Uuid) -> Result<()> {
-        let (url, save_path, segments_info, pause_flag, cancel_flag, num_segments, hdrs) = {
+        let (url, save_path, segments_info, pause_flag, cancel_flag, num_segments, hdrs, hls_data) = {
             let mut downloads = self.state.lock().unwrap();
 
             let active = self.count_downloading(&downloads);
@@ -496,37 +543,63 @@ impl DownloadEngine {
                 dl.cancel_flag.clone(),
                 n,
                 dl.headers.clone(),
+                dl.hls_data.clone(),
             )
         };
 
-        let seg_limit = self.per_segment_limit(num_segments);
-
         let client = self.client.lock().unwrap().clone();
-        let mut new_handles = Vec::new();
-        for (start, end, downloaded) in segments_info {
-            let done = downloaded.load(Ordering::Relaxed);
-            if end != u64::MAX && start + done >= end {
-                continue;
+
+        if let Some(hls) = hls_data {
+            let downloaded = segments_info
+                .first()
+                .map(|(_, _, d)| d.clone())
+                .unwrap_or_else(|| Arc::new(AtomicU64::new(0)));
+            downloaded.store(0, Ordering::Relaxed);
+
+            let handle = tokio::spawn(hls::download_hls(
+                client,
+                hls,
+                save_path,
+                downloaded,
+                pause_flag,
+                cancel_flag,
+                self.speed_limit.load(Ordering::Relaxed),
+                hdrs,
+            ));
+
+            let mut downloads = self.state.lock().unwrap();
+            if let Some(dl) = downloads.iter_mut().find(|d| d.id == id) {
+                dl.task_handles = vec![handle];
+            }
+        } else {
+            let seg_limit = self.per_segment_limit(num_segments);
+
+            let mut new_handles = Vec::new();
+            for (start, end, downloaded) in segments_info {
+                let done = downloaded.load(Ordering::Relaxed);
+                if end != u64::MAX && start + done >= end {
+                    continue;
+                }
+
+                let handle = tokio::spawn(download_segment(
+                    client.clone(),
+                    url.clone(),
+                    save_path.clone(),
+                    start,
+                    end,
+                    downloaded,
+                    pause_flag.clone(),
+                    cancel_flag.clone(),
+                    seg_limit,
+                    hdrs.clone(),
+                ));
+                new_handles.push(handle);
             }
 
-            let handle = tokio::spawn(download_segment(
-                client.clone(),
-                url.clone(),
-                save_path.clone(),
-                start,
-                end,
-                downloaded,
-                pause_flag.clone(),
-                cancel_flag.clone(),
-                seg_limit,
-                hdrs.clone(),
-            ));
-            new_handles.push(handle);
-        }
-
-        let mut downloads = self.state.lock().unwrap();
-        if let Some(dl) = downloads.iter_mut().find(|d| d.id == id) {
-            dl.task_handles = new_handles;
+            let mut downloads = self.state.lock().unwrap();
+            if let Some(dl) = downloads.iter_mut().find(|d| d.id == id) {
+                dl.task_handles = new_handles;
+            }
         }
 
         Ok(())
@@ -1133,6 +1206,7 @@ mod tests {
             error: None,
             resumable: true,
             headers: HashMap::new(),
+            hls_data: None,
         }]);
 
         let engine = DownloadEngine::new();
@@ -1172,6 +1246,7 @@ mod tests {
             error: None,
             resumable: true,
             headers: HashMap::new(),
+            hls_data: None,
         }]);
 
         let engine = DownloadEngine::new();
@@ -1205,6 +1280,7 @@ mod tests {
                 error: None,
                 resumable: false,
                 headers: HashMap::new(),
+                hls_data: None,
             },
             PersistedDownload {
                 id: id2,
@@ -1222,6 +1298,7 @@ mod tests {
                 error: None,
                 resumable: false,
                 headers: HashMap::new(),
+                hls_data: None,
             },
         ]);
 
@@ -1258,6 +1335,7 @@ mod tests {
             error: None,
             resumable: false,
             headers: HashMap::new(),
+            hls_data: None,
         }]);
 
         let engine = DownloadEngine::new();
@@ -1294,6 +1372,7 @@ mod tests {
                 error: Some("timeout".to_string()),
                 resumable: true,
                 headers: HashMap::new(),
+                hls_data: None,
             },
             PersistedDownload {
                 id: id_paused,
@@ -1311,6 +1390,7 @@ mod tests {
                 error: None,
                 resumable: true,
                 headers: HashMap::new(),
+                hls_data: None,
             },
         ]);
 
@@ -1358,6 +1438,7 @@ mod tests {
                 error: None,
                 resumable: true,
                 headers: HashMap::new(),
+                hls_data: None,
             },
             crate::model::PersistedDownload {
                 id: Uuid::new_v4(),
@@ -1375,6 +1456,7 @@ mod tests {
                 error: Some("timeout".to_string()),
                 resumable: true,
                 headers: HashMap::new(),
+                hls_data: None,
             },
             crate::model::PersistedDownload {
                 id: Uuid::new_v4(),
@@ -1392,6 +1474,7 @@ mod tests {
                 error: None,
                 resumable: true,
                 headers: HashMap::new(),
+                hls_data: None,
             },
         ]);
 

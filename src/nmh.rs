@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 const MANIFEST_NAME: &str = "com.bolt.nmh.json";
 
 /// Chrome extension IDs allowed to connect (allowed_origins format).
-/// Add the Chrome Web Store extension ID here once published.
 const ALLOWED_CHROME_IDS: &[&str] = &[
-    // "chrome-extension://YOUR_STORE_ID_HERE/",
+    "chrome-extension://ojepjfgoldagbilgkcfpojgffkmdhfke/",
+    "chrome-extension://edmcakbjmjdehehpmjkoponnegnmhdbd/",
 ];
 
 /// Firefox extension ID (allowed_extensions format).

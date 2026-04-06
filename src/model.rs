@@ -1,3 +1,4 @@
+use crate::download::hls::HlsData;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -148,6 +149,8 @@ pub struct PersistedDownload {
     pub resumable: bool,
     #[serde(default)]
     pub headers: HashMap<String, String>,
+    #[serde(default)]
+    pub hls_data: Option<HlsData>,
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +158,7 @@ pub struct ResolvedFileInfo {
     pub filename: String,
     pub total_size: Option<u64>,
     pub resumable: bool,
+    pub hls_data: Option<HlsData>,
 }
 
 #[derive(Debug, Clone)]
@@ -538,6 +542,7 @@ mod tests {
             error: None,
             resumable: true,
             headers: HashMap::new(),
+            hls_data: None,
         };
 
         let json = serde_json::to_string(&pd).unwrap();
@@ -588,6 +593,7 @@ mod tests {
                 filename: "resolved.tar.gz".to_string(),
                 total_size: Some(1024),
                 resumable: true,
+                hls_data: None,
             }),
         };
         assert_eq!(pd.display_filename(), "resolved.tar.gz");

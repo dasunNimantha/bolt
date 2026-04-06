@@ -1,6 +1,7 @@
 const NATIVE_HOST = "com.bolt.nmh";
 const toggle = document.getElementById("enableToggle");
 const cookieToggle = document.getElementById("cookieToggle");
+const videoDetectToggle = document.getElementById("videoDetectToggle");
 const statusEl = document.getElementById("status");
 
 const COOKIE_PERMS = {
@@ -8,8 +9,9 @@ const COOKIE_PERMS = {
   origins: ["<all_urls>"],
 };
 
-chrome.storage.local.get({ enabled: true }, (data) => {
+chrome.storage.local.get({ enabled: true, videoDetect: true }, (data) => {
   toggle.checked = data.enabled;
+  videoDetectToggle.checked = data.videoDetect;
 });
 
 chrome.permissions.contains(COOKIE_PERMS, (granted) => {
@@ -30,6 +32,10 @@ cookieToggle.addEventListener("change", () => {
       cookieToggle.checked = false;
     });
   }
+});
+
+videoDetectToggle.addEventListener("change", () => {
+  chrome.storage.local.set({ videoDetect: videoDetectToggle.checked });
 });
 
 chrome.runtime.sendNativeMessage(NATIVE_HOST, { ping: true }, (response) => {

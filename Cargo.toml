@@ -46,6 +46,9 @@ rfd = "0.14"
 # URL parsing
 url = "2"
 
+# HLS manifest parsing
+m3u8-rs = "6"
+
 # Image for app icon
 image = { version = "0.25", default-features = false, features = ["png"] }
 

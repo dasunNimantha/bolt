@@ -47,11 +47,17 @@ cd bolt-nmh && ./install.sh <your-chrome-extension-id>
 ```
 
 **Chrome / Chromium-based browsers:**
+
+Install from the [Chrome Web Store](https://chromewebstore.google.com/detail/bolt-download-manager/ojepjfgoldagbilgkcfpojgffkmdhfke), or load manually:
+
 1. Open `chrome://extensions`
 2. Enable **Developer Mode**
 3. Click **Load unpacked** and select the `extension/` directory
 
 **Firefox:**
+
+Install from [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/bolt-download-manager/), or load temporarily:
+
 1. Open `about:debugging#/runtime/this-firefox`
 2. Click **Load Temporary Add-on**
 3. Select `extension/manifest.json`
