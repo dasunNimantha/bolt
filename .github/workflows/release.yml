@@ -59,13 +59,13 @@ jobs:
           cp target/${{ matrix.target }}/release/bolt-nmh.exe ${{ matrix.artifact }}-nmh.exe
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
 
       - name: Upload NMH artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}-nmh
           path: ${{ matrix.artifact }}-nmh*
@@ -78,7 +78,7 @@ jobs:
 
       - name: Upload .deb artifact
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bolt-dm-deb
           path: target/${{ matrix.target }}/debian/*.deb
@@ -93,7 +93,7 @@ jobs:
 
       - name: Upload .rpm artifact
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bolt-dm-rpm
           path: target/generate-rpm/*.rpm
@@ -104,7 +104,7 @@ jobs:
 
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
