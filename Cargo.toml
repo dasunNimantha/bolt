@@ -38,7 +38,7 @@ chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1.0"
 
 # Settings storage
-directories = "5.0"
+directories = "6.0"
 
 # File dialog
 rfd = "0.14"
