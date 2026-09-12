@@ -41,7 +41,7 @@ anyhow = "1.0"
 directories = "5.0"
 
 # File dialog
-rfd = "0.14"
+rfd = "0.17"
 
 # URL parsing
 url = "2"
